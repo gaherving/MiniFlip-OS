@@ -22,7 +22,6 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
             serviceIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
             serviceIntent.setData(android.net.Uri.parse(serviceIntent.toUri(Intent.URI_INTENT_SCHEME)));
             views.setRemoteAdapter(R.id.widget_app_grid, serviceIntent);
-            views.setEmptyView(R.id.widget_app_grid, R.id.widget_root);
 
             PendingIntent template = appLaunchTemplate(context, appWidgetId * 100);
             views.setPendingIntentTemplate(R.id.widget_app_grid, template);
@@ -38,7 +37,7 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
     }
 
     private PendingIntent appLaunchTemplate(Context context, int requestCode) {
-        Intent intent = new Intent(context, MainActivity.class);
+        Intent intent = new Intent(context, WidgetLaunchActivity.class);
         intent.setAction("com.marilu.miniflip.OPEN_WIDGET_APP");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
