@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="#09090B">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="MiniFlip OS"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textSize="30sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="Escritorio para la pantalla externa"
+        android:textColor="#BFC1C7"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/widget_open"
+        android:layout_width="match_parent"
+        android:layout_height="62dp"
+        android:layout_marginTop="34dp"
+        android:gravity="center"
+        android:background="#25252D"
+        android:text="ABRIR MINI FLIP"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textSize="17sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:text="Toca cualquier parte para entrar"
+        android:textColor="#777982"
+        android:textSize="12sp" />
+</LinearLayout>
