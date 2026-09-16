@@ -22,14 +22,15 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
         for (int appWidgetId : appWidgetIds) {
             RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_miniflip_cover);
 
-            PendingIntent home = mainPendingIntent(context, appWidgetId * 10);
+            PendingIntent home = mainPendingIntent(context, appWidgetId * 10, 0);
+            PendingIntent apps = mainPendingIntent(context, appWidgetId * 10 + 1, 1);
             PendingIntent settings = settingsPendingIntent(context, appWidgetId * 10 + 2);
-            PendingIntent whatsapp = packagePendingIntent(context, "com.whatsapp", appWidgetId * 10 + 3, home);
-            PendingIntent chrome = packagePendingIntent(context, "com.android.chrome", appWidgetId * 10 + 4, home);
-            PendingIntent youtube = packagePendingIntent(context, "com.google.android.youtube", appWidgetId * 10 + 5, home);
+            PendingIntent whatsapp = packagePendingIntent(context, "com.whatsapp", appWidgetId * 10 + 3, apps);
+            PendingIntent chrome = packagePendingIntent(context, "com.android.chrome", appWidgetId * 10 + 4, apps);
+            PendingIntent youtube = packagePendingIntent(context, "com.google.android.youtube", appWidgetId * 10 + 5, apps);
 
             views.setOnClickPendingIntent(R.id.widget_root, home);
-            views.setOnClickPendingIntent(R.id.widget_apps, home);
+            views.setOnClickPendingIntent(R.id.widget_apps, apps);
             views.setOnClickPendingIntent(R.id.widget_settings, settings);
             views.setOnClickPendingIntent(R.id.widget_slot_whatsapp, whatsapp);
             views.setOnClickPendingIntent(R.id.widget_slot_chrome, chrome);
@@ -43,8 +44,9 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
         }
     }
 
-    private PendingIntent mainPendingIntent(Context context, int requestCode) {
+    private PendingIntent mainPendingIntent(Context context, int requestCode, int page) {
         Intent intent = new Intent(context, MainActivity.class);
+        intent.putExtra(MainActivity.EXTRA_PAGE, page);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         return pendingIntentFor(context, requestCode, intent);
     }
