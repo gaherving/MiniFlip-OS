@@ -21,6 +21,7 @@ import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -34,6 +35,8 @@ import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends Activity {
+    public static final String EXTRA_PAGE = "miniflip_page";
+
     private static final int PAGE_HOME = 0;
     private static final int PAGE_APPS = 1;
     private static final int PAGE_RECENTS = 2;
@@ -67,7 +70,21 @@ public class MainActivity extends Activity {
 
         loadLauncherApps();
         buildUi();
-        showPage(PAGE_HOME);
+        showPage(resolveRequestedPage(getIntent()));
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        showPage(resolveRequestedPage(intent));
+    }
+
+    private int resolveRequestedPage(Intent intent) {
+        if (intent == null) return PAGE_HOME;
+        int page = intent.getIntExtra(EXTRA_PAGE, PAGE_HOME);
+        if (page < PAGE_HOME || page > PAGE_RECENTS) return PAGE_HOME;
+        return page;
     }
 
     @Override
@@ -116,7 +133,6 @@ public class MainActivity extends Activity {
         TextView settingsButton = makeRoundTextButton("⚙");
         settingsButton.setOnClickListener(v -> openSettings());
         header.addView(settingsButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
-
         root.addView(header, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new FrameLayout(this);
@@ -131,20 +147,28 @@ public class MainActivity extends Activity {
 
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setGravity(Gravity.CENTER);
-        nav.setPadding(0, dp(4), 0, 0);
+        nav.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        nav.setPadding(dp(2), dp(3), 0, dp(3));
 
         navHome = makeNavButton("Inicio");
         navApps = makeNavButton("Apps");
-        navRecents = makeNavButton("Recientes");
+        navRecents = makeNavButton("Rec.");
         navHome.setOnClickListener(v -> showPage(PAGE_HOME));
         navApps.setOnClickListener(v -> showPage(PAGE_APPS));
         navRecents.setOnClickListener(v -> showPage(PAGE_RECENTS));
 
-        nav.addView(navHome, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        nav.addView(navApps, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        nav.addView(navRecents, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(52)));
+        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(72), dp(38));
+        p1.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(66), dp(38));
+        p2.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(70), dp(38));
+        p3.setMargins(0, 0, dp(5), 0);
+
+        nav.addView(navHome, p1);
+        nav.addView(navApps, p2);
+        nav.addView(navRecents, p3);
+        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(38), 1f));
+        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(44)));
 
         setContentView(root);
     }
@@ -170,7 +194,6 @@ public class MainActivity extends Activity {
         addFavorite(favorites, "com.android.chrome", "Chrome");
         addFavorite(favorites, "com.google.android.youtube", "YouTube");
         favorites.addView(makeSettingsTile());
-
         page.addView(favorites, new LinearLayout.LayoutParams(-1, dp(108)));
 
         TextView allApps = makeWideButton("Todas las aplicaciones");
@@ -186,7 +209,7 @@ public class MainActivity extends Activity {
         page.addView(recent, recentParams);
 
         TextView tip = new TextView(this);
-        tip.setText("MiniFlip OS Home · pantalla exclusiva para usar el Flip cerrado");
+        tip.setText("MiniFlip OS Home · diseñado para la pantalla exterior del Flip5");
         tip.setTextColor(Color.GRAY);
         tip.setTextSize(10);
         tip.setGravity(Gravity.CENTER);
@@ -273,15 +296,16 @@ public class MainActivity extends Activity {
     private void styleNav(TextView v, boolean selected) {
         v.setTextColor(selected ? Color.WHITE : Color.LTGRAY);
         v.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-        v.setBackgroundColor(selected ? Color.rgb(39, 39, 48) : Color.TRANSPARENT);
+        v.setBackgroundColor(selected ? Color.rgb(39, 39, 48) : Color.rgb(20, 20, 25));
     }
 
     private TextView makeNavButton(String text) {
         TextView v = new TextView(this);
         v.setText(text);
-        v.setTextSize(12);
+        v.setTextColor(Color.LTGRAY);
+        v.setTextSize(11);
         v.setGravity(Gravity.CENTER);
-        v.setPadding(dp(4), 0, dp(4), 0);
+        v.setPadding(dp(3), 0, dp(3), 0);
         return v;
     }
 
