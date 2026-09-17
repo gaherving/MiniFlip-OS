@@ -9,10 +9,12 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -38,15 +40,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import rikka.shizuku.Shizuku;
+
 public class MainActivity extends Activity {
     public static final String EXTRA_PAGE = "miniflip_page";
+    public static final String EXTRA_OPEN_SETTINGS = "irving_open_settings";
 
     private static final int PAGE_HOME = 0;
     private static final int PAGE_APPS = 1;
     private static final int REQUEST_WALLPAPER = 7001;
+    private static final int REQUEST_SHIZUKU = 7101;
     private static final int HOME_SLOTS = 8;
     private static final int DOCK_SLOTS = 5;
     private static final int COVER_DISPLAY_ID = 1;
+    private static final long HOME_HOLD_MS = 3000L;
 
     private static final String PREFS = "miniflip_prefs";
     private static final String WALLPAPER_URI = "wallpaper_uri";
@@ -55,6 +62,8 @@ public class MainActivity extends Activity {
     private static final String OLD_FAVORITE_PREFIX = "favorite_";
 
     private final List<AppEntry> allApps = new ArrayList<>();
+    private final Handler holdHandler = new Handler(Looper.getMainLooper());
+
     private FrameLayout content;
     private FrameLayout homePage;
     private FrameLayout appsPage;
@@ -64,7 +73,36 @@ public class MainActivity extends Activity {
     private EditText search;
     private ImageView wallpaperView;
     private int currentPage = PAGE_HOME;
-    private long dockTouchStart;
+
+    private float homeDownX;
+    private float homeDownY;
+    private boolean homeHoldTriggered;
+
+    private final Runnable homeHoldRunnable = new Runnable() {
+        @Override
+        public void run() {
+            homeHoldTriggered = true;
+            showAddToHomePicker();
+        }
+    };
+
+    private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener =
+            new Shizuku.OnRequestPermissionResultListener() {
+                @Override
+                public void onRequestPermissionResult(int requestCode, int grantResult) {
+                    if (requestCode != REQUEST_SHIZUKU) return;
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                        RotationController.startRotationEnforcer(MainActivity.this);
+                        Toast.makeText(MainActivity.this,
+                                "Rotación completa de la pantalla externa activada",
+                                Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this,
+                                "Se necesita permiso de Shizuku para girar también las otras aplicaciones",
+                                Toast.LENGTH_LONG).show();
+                    }
+                }
+            };
 
     private int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
@@ -77,17 +115,29 @@ public class MainActivity extends Activity {
         applyImmersiveMode();
         getWindow().setStatusBarColor(Color.BLACK);
         getWindow().setNavigationBarColor(Color.BLACK);
+
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
+        } catch (Throwable ignored) {}
+
         loadLauncherApps();
         buildUi();
         RotationController.startRotationEnforcer(this);
-        showPage(resolveRequestedPage(getIntent()));
+        handleIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
         showPage(resolveRequestedPage(intent));
+        if (intent != null && intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)) {
+            content.postDelayed(this::showIrvingSettings, 180);
+        }
     }
 
     @Override
@@ -95,6 +145,15 @@ public class MainActivity extends Activity {
         super.onResume();
         applyImmersiveMode();
         RotationController.startRotationEnforcer(this);
+    }
+
+    @Override
+    protected void onDestroy() {
+        holdHandler.removeCallbacks(homeHoldRunnable);
+        try {
+            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener);
+        } catch (Throwable ignored) {}
+        super.onDestroy();
     }
 
     @Override
@@ -106,13 +165,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_WALLPAPER && resultCode == RESULT_OK && data != null && data.getData() != null) {
+        if (requestCode == REQUEST_WALLPAPER && resultCode == RESULT_OK
+                && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {
                 int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
                 getContentResolver().takePersistableUriPermission(uri, flags);
             } catch (Exception ignored) {}
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(WALLPAPER_URI, uri.toString()).apply();
+            getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putString(WALLPAPER_URI, uri.toString())
+                    .apply();
             applySavedWallpaper();
         }
     }
@@ -144,7 +207,7 @@ public class MainActivity extends Activity {
         shell.addView(wallpaperView, new FrameLayout.LayoutParams(-1, -1));
 
         View scrim = new View(this);
-        scrim.setBackgroundColor(Color.argb(45, 0, 0, 0));
+        scrim.setBackgroundColor(Color.argb(38, 0, 0, 0));
         shell.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
 
         content = new FrameLayout(this);
@@ -163,6 +226,8 @@ public class MainActivity extends Activity {
         FrameLayout page = new FrameLayout(this);
         page.setClipChildren(false);
         page.setClipToPadding(false);
+        page.setClickable(true);
+        installHomeBackgroundHold(page);
 
         TextView title = new TextView(this);
         title.setText("Irving OS");
@@ -171,7 +236,8 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setShadowLayer(5f, 0f, 1f, Color.BLACK);
-        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(dp(130), dp(38), Gravity.TOP | Gravity.START);
+        FrameLayout.LayoutParams titleLp =
+                new FrameLayout.LayoutParams(dp(130), dp(38), Gravity.TOP | Gravity.START);
         titleLp.leftMargin = dp(12);
         titleLp.topMargin = dp(7);
         page.addView(title, titleLp);
@@ -180,24 +246,25 @@ public class MainActivity extends Activity {
         homeGrid.setColumnCount(4);
         homeGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
         homeGrid.setUseDefaultMargins(false);
-        FrameLayout.LayoutParams gridLp = new FrameLayout.LayoutParams(-1, dp(174), Gravity.TOP);
+        FrameLayout.LayoutParams gridLp =
+                new FrameLayout.LayoutParams(-1, dp(176), Gravity.TOP);
         gridLp.leftMargin = dp(8);
         gridLp.rightMargin = dp(8);
-        gridLp.topMargin = dp(48);
+        gridLp.topMargin = dp(47);
         page.addView(homeGrid, gridLp);
         renderHomeShortcuts();
 
         dock = new LinearLayout(this);
         dock.setOrientation(LinearLayout.HORIZONTAL);
         dock.setGravity(Gravity.CENTER);
-        dock.setPadding(dp(5), dp(4), dp(5), dp(4));
+        dock.setPadding(dp(8), dp(4), dp(8), dp(4));
         dock.setClipChildren(false);
         dock.setClipToPadding(false);
-        dock.setBackground(rounded(Color.argb(210, 37, 39, 48), 18));
-        FrameLayout.LayoutParams dockLp = new FrameLayout.LayoutParams(-1, dp(70), Gravity.BOTTOM | Gravity.START);
-        dockLp.leftMargin = dp(7);
-        dockLp.rightMargin = dp(112);
-        dockLp.bottomMargin = dp(8);
+        dock.setBackground(rounded(Color.argb(205, 37, 39, 48), 18));
+
+        FrameLayout.LayoutParams dockLp =
+                new FrameLayout.LayoutParams(-2, dp(66), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        dockLp.bottomMargin = dp(60);
         page.addView(dock, dockLp);
         renderDock();
         installDockTouchBehavior();
@@ -206,7 +273,7 @@ public class MainActivity extends Activity {
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER);
         controls.setPadding(dp(2), dp(2), dp(2), dp(2));
-        controls.setBackground(rounded(Color.argb(195, 29, 30, 37), 14));
+        controls.setBackground(rounded(Color.argb(205, 29, 30, 37), 14));
 
         TextView appsButton = compactControl("Apps", 10);
         appsButton.setOnClickListener(v -> showPage(PAGE_APPS));
@@ -218,12 +285,42 @@ public class MainActivity extends Activity {
         settingsLp.leftMargin = dp(4);
         controls.addView(settingsButton, settingsLp);
 
-        FrameLayout.LayoutParams controlsLp = new FrameLayout.LayoutParams(dp(98), dp(44), Gravity.END | Gravity.BOTTOM);
-        controlsLp.rightMargin = dp(6);
-        controlsLp.bottomMargin = dp(84);
+        FrameLayout.LayoutParams controlsLp =
+                new FrameLayout.LayoutParams(dp(98), dp(44), Gravity.BOTTOM | Gravity.START);
+        controlsLp.leftMargin = dp(8);
+        controlsLp.bottomMargin = dp(8);
         page.addView(controls, controlsLp);
 
         return page;
+    }
+
+    private void installHomeBackgroundHold(FrameLayout page) {
+        page.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    homeDownX = event.getX();
+                    homeDownY = event.getY();
+                    homeHoldTriggered = false;
+                    holdHandler.removeCallbacks(homeHoldRunnable);
+                    holdHandler.postDelayed(homeHoldRunnable, HOME_HOLD_MS);
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(event.getX() - homeDownX) > dp(18)
+                            || Math.abs(event.getY() - homeDownY) > dp(18)) {
+                        holdHandler.removeCallbacks(homeHoldRunnable);
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    holdHandler.removeCallbacks(homeHoldRunnable);
+                    return homeHoldTriggered;
+
+                default:
+                    return true;
+            }
+        });
     }
 
     private FrameLayout buildAppsPage() {
@@ -271,6 +368,7 @@ public class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setPadding(0, 0, 0, dp(92));
+
         appsGrid = new GridLayout(this);
         appsGrid.setColumnCount(4);
         appsGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
@@ -286,13 +384,18 @@ public class MainActivity extends Activity {
             }
             @Override public void afterTextChanged(Editable s) {}
         });
+
         return page;
     }
 
     private void showPage(int page) {
         currentPage = page == PAGE_APPS ? PAGE_APPS : PAGE_HOME;
-        if (homePage != null) homePage.setVisibility(currentPage == PAGE_HOME ? View.VISIBLE : View.GONE);
-        if (appsPage != null) appsPage.setVisibility(currentPage == PAGE_APPS ? View.VISIBLE : View.GONE);
+        if (homePage != null) {
+            homePage.setVisibility(currentPage == PAGE_HOME ? View.VISIBLE : View.GONE);
+        }
+        if (appsPage != null) {
+            appsPage.setVisibility(currentPage == PAGE_APPS ? View.VISIBLE : View.GONE);
+        }
         if (currentPage == PAGE_HOME) {
             renderHomeShortcuts();
             renderDock();
@@ -321,43 +424,72 @@ public class MainActivity extends Activity {
     private void renderHomeShortcuts() {
         if (homeGrid == null) return;
         homeGrid.removeAllViews();
-        for (int i = 0; i < HOME_SLOTS; i++) homeGrid.addView(makeHomeSlot(i));
+
+        for (int slot = 0; slot < HOME_SLOTS; slot++) {
+            AppEntry app = getHomeApp(slot);
+            if (app == null) continue;
+            homeGrid.addView(makeHomeTile(app, slot));
+        }
     }
 
-    private View makeHomeSlot(final int slot) {
-        AppEntry app = getHomeApp(slot);
+    private View makeHomeTile(AppEntry app, int slot) {
         LinearLayout box = baseTile(84);
-        if (app == null) {
-            TextView plus = new TextView(this);
-            plus.setText("+");
-            plus.setTextColor(Color.WHITE);
-            plus.setTextSize(27);
-            plus.setGravity(Gravity.CENTER);
-            plus.setBackground(rounded(Color.argb(120, 45, 45, 54), 14));
-            box.addView(plus, new LinearLayout.LayoutParams(dp(42), dp(42)));
-            box.addView(tileLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(25)));
-            box.setOnClickListener(v -> chooseAppForHomeSlot(slot));
-            return box;
-        }
 
         ImageView icon = new ImageView(this);
         icon.setImageDrawable(app.icon);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         box.addView(icon, new LinearLayout.LayoutParams(dp(43), dp(43)));
         box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(25)));
+
         box.setOnClickListener(v -> openApp(app));
-        box.setOnLongClickListener(v -> { chooseAppForHomeSlot(slot); return true; });
+        box.setOnLongClickListener(v -> {
+            chooseAppForHomeSlot(slot);
+            return true;
+        });
         return box;
+    }
+
+    private void showAddToHomePicker() {
+        int freeSlot = firstFreeSlot(HOME_PREFIX, HOME_SLOTS);
+        if (freeSlot < 0) {
+            Toast.makeText(this,
+                    "La pantalla principal está llena. Puedes cambiar aplicaciones desde Ajustes.",
+                    Toast.LENGTH_LONG).show();
+            showHomeManager();
+            return;
+        }
+
+        String[] items = new String[allApps.size()];
+        for (int i = 0; i < allApps.size(); i++) items[i] = allApps.get(i).label;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Agregar a pantalla principal")
+                .setItems(items, (dialog, which) -> {
+                    AppEntry app = allApps.get(which);
+                    saveAppToSlot(HOME_PREFIX, freeSlot, app);
+                    renderHomeShortcuts();
+                    Toast.makeText(this, app.label + " agregada", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     private void renderDock() {
         if (dock == null) return;
         dock.removeAllViews();
-        for (int i = 0; i < DOCK_SLOTS; i++) {
-            AppEntry app = getDockApp(i);
-            dock.addView(makeDockItem(app, i), new LinearLayout.LayoutParams(0, dp(62), 1f));
+
+        int added = 0;
+        for (int slot = 0; slot < DOCK_SLOTS; slot++) {
+            AppEntry app = getDockApp(slot);
+            if (app == null) continue;
+            View item = makeDockItem(app, slot);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(50), dp(58));
+            lp.setMargins(dp(1), 0, dp(1), 0);
+            dock.addView(item, lp);
+            added++;
         }
-        dock.addView(makeDockEditItem(), new LinearLayout.LayoutParams(0, dp(62), 1f));
+
+        dock.setVisibility(added == 0 ? View.GONE : View.VISIBLE);
     }
 
     private View makeDockItem(AppEntry app, int slot) {
@@ -368,40 +500,11 @@ public class MainActivity extends Activity {
         item.setTag(slot);
         item.setClickable(false);
 
-        if (app == null) {
-            TextView plus = new TextView(this);
-            plus.setText("+");
-            plus.setTextColor(Color.WHITE);
-            plus.setTextSize(22);
-            plus.setGravity(Gravity.CENTER);
-            plus.setBackground(rounded(Color.argb(120, 70, 70, 82), 10));
-            item.addView(plus, new LinearLayout.LayoutParams(dp(31), dp(31)));
-            item.addView(dockLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(19)));
-        } else {
-            ImageView icon = new ImageView(this);
-            icon.setImageDrawable(app.icon);
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            item.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
-            item.addView(dockLabel(shortLabel(app.label)), new LinearLayout.LayoutParams(-1, dp(19)));
-        }
-        return item;
-    }
-
-    private View makeDockEditItem() {
-        LinearLayout item = new LinearLayout(this);
-        item.setOrientation(LinearLayout.VERTICAL);
-        item.setGravity(Gravity.CENTER);
-        item.setClickable(false);
-        item.setTag(DOCK_SLOTS);
-
-        TextView icon = new TextView(this);
-        icon.setText("✎");
-        icon.setTextColor(Color.WHITE);
-        icon.setTextSize(20);
-        icon.setGravity(Gravity.CENTER);
-        icon.setBackground(rounded(Color.argb(170, 74, 78, 95), 10));
-        item.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
-        item.addView(dockLabel("Editar"), new LinearLayout.LayoutParams(-1, dp(19)));
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(app.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        item.addView(icon, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        item.addView(dockLabel(shortLabel(app.label)), new LinearLayout.LayoutParams(-1, dp(18)));
         return item;
     }
 
@@ -423,32 +526,34 @@ public class MainActivity extends Activity {
     private void installDockTouchBehavior() {
         dock.setOnTouchListener((v, event) -> {
             if (dock.getChildCount() == 0 || dock.getWidth() <= 0) return true;
+
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    dockTouchStart = System.currentTimeMillis();
                     magnifyDockAt(event.getX());
                     return true;
+
                 case MotionEvent.ACTION_MOVE:
                     magnifyDockAt(event.getX());
                     return true;
+
                 case MotionEvent.ACTION_UP:
-                    int index = dockIndexAt(event.getX());
-                    long held = System.currentTimeMillis() - dockTouchStart;
+                    int childIndex = dockIndexAt(event.getX());
                     restoreDockScale();
-                    if (index >= 0 && index < DOCK_SLOTS) {
-                        if (held >= 650) chooseAppForDockSlot(index);
-                        else {
-                            AppEntry app = getDockApp(index);
-                            if (app == null) chooseAppForDockSlot(index);
-                            else openApp(app);
+
+                    if (childIndex >= 0 && childIndex < dock.getChildCount()) {
+                        View child = dock.getChildAt(childIndex);
+                        Object tag = child.getTag();
+                        if (tag instanceof Integer) {
+                            AppEntry app = getDockApp((Integer) tag);
+                            if (app != null) openApp(app);
                         }
-                    } else if (index == DOCK_SLOTS) {
-                        showDockManager();
                     }
                     return true;
+
                 case MotionEvent.ACTION_CANCEL:
                     restoreDockScale();
                     return true;
+
                 default:
                     return true;
             }
@@ -458,6 +563,7 @@ public class MainActivity extends Activity {
     private int dockIndexAt(float x) {
         int count = dock.getChildCount();
         if (count <= 0 || dock.getWidth() <= 0) return -1;
+
         int index = (int) (x / ((float) dock.getWidth() / count));
         if (index < 0) index = 0;
         if (index >= count) index = count - 1;
@@ -467,22 +573,36 @@ public class MainActivity extends Activity {
     private void magnifyDockAt(float x) {
         int count = dock.getChildCount();
         if (count <= 0) return;
+
         float cell = dock.getWidth() / (float) count;
         for (int i = 0; i < count; i++) {
             View child = dock.getChildAt(i);
             float center = cell * (i + 0.5f);
             float distance = Math.abs(x - center) / Math.max(1f, cell);
+
             float scale;
-            if (distance < 0.55f) scale = 1.38f;
+            if (distance < 0.55f) scale = 1.42f;
             else if (distance < 1.25f) scale = 1.20f;
             else scale = 1.0f;
-            child.animate().scaleX(scale).scaleY(scale).translationY(scale > 1f ? -dp(5) : 0).setDuration(70).start();
+
+            child.animate()
+                    .scaleX(scale)
+                    .scaleY(scale)
+                    .translationY(scale > 1f ? -dp(6) : 0)
+                    .setDuration(70)
+                    .start();
         }
     }
 
     private void restoreDockScale() {
         for (int i = 0; i < dock.getChildCount(); i++) {
-            dock.getChildAt(i).animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(120).start();
+            dock.getChildAt(i)
+                    .animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(120)
+                    .start();
         }
     }
 
@@ -492,6 +612,7 @@ public class MainActivity extends Activity {
             AppEntry app = getDockApp(i);
             rows[i] = "Posición " + (i + 1) + " · " + (app == null ? "Vacía" : app.label);
         }
+
         new AlertDialog.Builder(this)
                 .setTitle("Editar Dock")
                 .setItems(rows, (dialog, which) -> chooseAppForDockSlot(which))
@@ -505,6 +626,7 @@ public class MainActivity extends Activity {
             AppEntry app = getHomeApp(i);
             rows[i] = "Espacio " + (i + 1) + " · " + (app == null ? "Vacío" : app.label);
         }
+
         new AlertDialog.Builder(this)
                 .setTitle("Editar pantalla principal")
                 .setItems(rows, (dialog, which) -> chooseAppForHomeSlot(which))
@@ -513,11 +635,13 @@ public class MainActivity extends Activity {
     }
 
     private void chooseAppForHomeSlot(int slot) {
-        chooseAppForSlot("Elegir aplicación para Inicio", HOME_PREFIX, slot, this::renderHomeShortcuts);
+        chooseAppForSlot("Elegir aplicación para Inicio",
+                HOME_PREFIX, slot, this::renderHomeShortcuts);
     }
 
     private void chooseAppForDockSlot(int slot) {
-        chooseAppForSlot("Elegir aplicación para Dock", DOCK_PREFIX, slot, this::renderDock);
+        chooseAppForSlot("Elegir aplicación para Dock",
+                DOCK_PREFIX, slot, this::renderDock);
     }
 
     private void chooseAppForSlot(String title, String prefix, int slot, Runnable afterSave) {
@@ -528,11 +652,15 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setItems(items, (dialog, which) -> {
-                    SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-                    if (which == 0) editor.putString(prefix + slot, "");
-                    else {
+                    SharedPreferences.Editor editor =
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+
+                    if (which == 0) {
+                        editor.putString(prefix + slot, "");
+                    } else {
                         AppEntry app = allApps.get(which - 1);
-                        editor.putString(prefix + slot, app.packageName + "\n" + app.activityName);
+                        editor.putString(prefix + slot,
+                                app.packageName + "\n" + app.activityName);
                     }
                     editor.apply();
                     afterSave.run();
@@ -541,28 +669,60 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private int firstFreeSlot(String prefix, int slots) {
+        for (int i = 0; i < slots; i++) {
+            AppEntry app = prefix.equals(DOCK_PREFIX) ? getDockApp(i) : getHomeApp(i);
+            if (app == null) return i;
+        }
+        return -1;
+    }
+
+    private void saveAppToSlot(String prefix, int slot, AppEntry app) {
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(prefix + slot, app.packageName + "\n" + app.activityName)
+                .apply();
+    }
+
     private AppEntry getHomeApp(int slot) {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String key = HOME_PREFIX + slot;
+
         if (!prefs.contains(key) && prefs.contains(OLD_FAVORITE_PREFIX + slot)) {
             String old = prefs.getString(OLD_FAVORITE_PREFIX + slot, "");
             prefs.edit().putString(key, old == null ? "" : old).apply();
         }
-        String defaultPkg = slot == 0 ? "com.whatsapp" : slot == 1 ? "com.android.chrome" : slot == 2 ? "com.google.android.youtube" : null;
+
+        String defaultPkg =
+                slot == 0 ? "com.whatsapp"
+                        : slot == 1 ? "com.android.chrome"
+                        : slot == 2 ? "com.google.android.youtube"
+                        : null;
+
         return getSavedApp(HOME_PREFIX, slot, defaultPkg);
     }
 
     private AppEntry getDockApp(int slot) {
-        String defaultPkg = slot == 0 ? "com.whatsapp" : slot == 1 ? "com.android.chrome" : slot == 2 ? "com.google.android.youtube" : null;
+        String defaultPkg =
+                slot == 0 ? "com.whatsapp"
+                        : slot == 1 ? "com.android.chrome"
+                        : slot == 2 ? "com.google.android.youtube"
+                        : null;
+
         return getSavedApp(DOCK_PREFIX, slot, defaultPkg);
     }
 
     private AppEntry getSavedApp(String prefix, int slot, String defaultPkg) {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String key = prefix + slot;
-        if (!prefs.contains(key)) return defaultPkg == null ? null : findByPackage(defaultPkg);
+
+        if (!prefs.contains(key)) {
+            return defaultPkg == null ? null : findByPackage(defaultPkg);
+        }
+
         String raw = prefs.getString(key, "");
         if (raw == null || raw.isEmpty()) return null;
+
         String[] parts = raw.split("\n", 2);
         if (parts.length == 2) {
             AppEntry exact = findByComponent(parts[0], parts[1]);
@@ -574,6 +734,7 @@ public class MainActivity extends Activity {
     private void renderApps(String query) {
         if (appsGrid == null) return;
         appsGrid.removeAllViews();
+
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         for (AppEntry app : allApps) {
             if (!q.isEmpty() && !app.label.toLowerCase(Locale.ROOT).contains(q)) continue;
@@ -583,11 +744,13 @@ public class MainActivity extends Activity {
 
     private View makeAppTile(AppEntry app) {
         LinearLayout box = baseTile(86);
+
         ImageView icon = new ImageView(this);
         icon.setImageDrawable(app.icon);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
         box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(27)));
+
         box.setOnClickListener(v -> openApp(app));
         box.setOnLongClickListener(v -> {
             showAddAppDialog(app);
@@ -598,11 +761,15 @@ public class MainActivity extends Activity {
 
     private void showAddAppDialog(AppEntry app) {
         String[] options = {"Agregar a pantalla principal", "Agregar al Dock"};
+
         new AlertDialog.Builder(this)
                 .setTitle(app.label)
                 .setItems(options, (d, which) -> {
-                    if (which == 0) chooseDestinationForApp(app, HOME_PREFIX, HOME_SLOTS, "Pantalla principal");
-                    else chooseDestinationForApp(app, DOCK_PREFIX, DOCK_SLOTS, "Dock");
+                    if (which == 0) {
+                        chooseDestinationForApp(app, HOME_PREFIX, HOME_SLOTS, "Pantalla principal");
+                    } else {
+                        chooseDestinationForApp(app, DOCK_PREFIX, DOCK_SLOTS, "Dock");
+                    }
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
@@ -612,15 +779,16 @@ public class MainActivity extends Activity {
         String[] rows = new String[slots];
         for (int i = 0; i < slots; i++) {
             AppEntry existing = prefix.equals(DOCK_PREFIX) ? getDockApp(i) : getHomeApp(i);
-            rows[i] = "Posición " + (i + 1) + " · " + (existing == null ? "Vacía" : existing.label);
+            rows[i] = "Posición " + (i + 1) + " · "
+                    + (existing == null ? "Vacía" : existing.label);
         }
+
         new AlertDialog.Builder(this)
                 .setTitle("Agregar a " + title)
                 .setItems(rows, (d, which) -> {
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                            .putString(prefix + which, app.packageName + "\n" + app.activityName)
-                            .apply();
-                    if (prefix.equals(DOCK_PREFIX)) renderDock(); else renderHomeShortcuts();
+                    saveAppToSlot(prefix, which, app);
+                    if (prefix.equals(DOCK_PREFIX)) renderDock();
+                    else renderHomeShortcuts();
                     Toast.makeText(this, app.label + " agregada", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Cancelar", null)
@@ -643,6 +811,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(2), dp(4), dp(2), dp(2));
+
         GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
         gp.width = 0;
         gp.height = dp(heightDp);
@@ -658,9 +827,10 @@ public class MainActivity extends Activity {
                 "Editar Dock",
                 "Cambiar imagen de fondo",
                 "Quitar imagen de fondo",
-                "Activar rotación forzada en pantalla externa",
+                "Activar rotación completa de pantalla externa",
                 "Ajustes del teléfono"
         };
+
         new AlertDialog.Builder(this)
                 .setTitle("Irving OS")
                 .setItems(items, (dialog, which) -> {
@@ -679,13 +849,17 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_WALLPAPER);
     }
 
-    @Override
     public void clearWallpaper() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .remove(WALLPAPER_URI)
+                .apply();
+
         if (wallpaperView != null) {
             wallpaperView.setImageDrawable(null);
             wallpaperView.setBackgroundColor(Color.BLACK);
@@ -694,12 +868,16 @@ public class MainActivity extends Activity {
 
     private void applySavedWallpaper() {
         if (wallpaperView == null) return;
-        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, "");
+
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString(WALLPAPER_URI, "");
+
         if (saved == null || saved.isEmpty()) {
             wallpaperView.setImageDrawable(null);
             wallpaperView.setBackgroundColor(Color.BLACK);
             return;
         }
+
         try {
             wallpaperView.setImageURI(Uri.parse(saved));
         } catch (Exception e) {
@@ -708,19 +886,35 @@ public class MainActivity extends Activity {
     }
 
     private void enableForcedRotation() {
-        if (!RotationController.canWrite(this)) {
-            startActivity(RotationController.permissionIntent(this));
-            Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' y vuelve a Irving OS", Toast.LENGTH_LONG).show();
+        if (!RotationController.isShizukuRunning()) {
+            Toast.makeText(this,
+                    "Para girar también todas las aplicaciones, inicia Shizuku y vuelve a pulsar esta opción.",
+                    Toast.LENGTH_LONG).show();
             return;
         }
+
+        if (!RotationController.hasShizukuPermission()) {
+            try {
+                Shizuku.requestPermission(REQUEST_SHIZUKU);
+            } catch (Throwable e) {
+                Toast.makeText(this,
+                        "No se pudo solicitar el permiso de Shizuku",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+
         RotationController.startRotationEnforcer(this);
-        Toast.makeText(this, "Rotación de pantalla externa activada", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this,
+                "Rotación completa de la pantalla externa activada",
+                Toast.LENGTH_SHORT).show();
     }
 
     private void loadLauncherApps() {
         PackageManager pm = getPackageManager();
         Intent intent = new Intent(Intent.ACTION_MAIN, null);
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
+
         List<ResolveInfo> results = pm.queryIntentActivities(intent, 0);
         String self = getPackageName();
         Set<String> seen = new LinkedHashSet<>();
@@ -728,62 +922,99 @@ public class MainActivity extends Activity {
         for (ResolveInfo r : results) {
             if (r.activityInfo == null || r.activityInfo.packageName == null) continue;
             if (self.equals(r.activityInfo.packageName)) continue;
+
             String key = r.activityInfo.packageName + "/" + r.activityInfo.name;
             if (!seen.add(key)) continue;
+
             CharSequence labelCs = r.loadLabel(pm);
-            String label = labelCs == null ? r.activityInfo.packageName : labelCs.toString();
+            String label =
+                    labelCs == null ? r.activityInfo.packageName : labelCs.toString();
             Drawable icon = r.loadIcon(pm);
-            allApps.add(new AppEntry(label, r.activityInfo.packageName, r.activityInfo.name, icon));
+
+            allApps.add(new AppEntry(
+                    label,
+                    r.activityInfo.packageName,
+                    r.activityInfo.name,
+                    icon
+            ));
         }
 
         final Collator collator = Collator.getInstance(new Locale("es", "MX"));
         Collections.sort(allApps, new Comparator<AppEntry>() {
-            @Override public int compare(AppEntry a, AppEntry b) { return collator.compare(a.label, b.label); }
+            @Override
+            public int compare(AppEntry a, AppEntry b) {
+                return collator.compare(a.label, b.label);
+            }
         });
     }
 
     private AppEntry findByPackage(String packageName) {
-        for (AppEntry app : allApps) if (app.packageName.equals(packageName)) return app;
+        for (AppEntry app : allApps) {
+            if (app.packageName.equals(packageName)) return app;
+        }
         return null;
     }
 
     private AppEntry findByComponent(String packageName, String activityName) {
         for (AppEntry app : allApps) {
-            if (app.packageName.equals(packageName) && app.activityName.equals(activityName)) return app;
+            if (app.packageName.equals(packageName)
+                    && app.activityName.equals(activityName)) {
+                return app;
+            }
         }
         return null;
     }
 
     private void openApp(AppEntry app) {
         RotationController.startRotationEnforcer(this);
+
         try {
             Intent i = new Intent(Intent.ACTION_MAIN);
             i.addCategory(Intent.CATEGORY_LAUNCHER);
             i.setClassName(app.packageName, app.activityName);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-            Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(COVER_DISPLAY_ID)
+                    .toBundle();
+
             startActivity(i, options);
         } catch (Exception e) {
             try {
-                Intent fallback = getPackageManager().getLaunchIntentForPackage(app.packageName);
+                Intent fallback = getPackageManager()
+                        .getLaunchIntentForPackage(app.packageName);
+
                 if (fallback != null) {
-                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+                    Bundle options = ActivityOptions.makeBasic()
+                            .setLaunchDisplayId(COVER_DISPLAY_ID)
+                            .toBundle();
+
                     startActivity(fallback, options);
                     return;
                 }
             } catch (Exception ignored) {}
-            Toast.makeText(this, "No se pudo abrir " + app.label, Toast.LENGTH_SHORT).show();
+
+            Toast.makeText(this,
+                    "No se pudo abrir " + app.label,
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
     private void openSettings() {
         RotationController.startRotationEnforcer(this);
         try {
-            Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(COVER_DISPLAY_ID)
+                    .toBundle();
             startActivity(new Intent(Settings.ACTION_SETTINGS), options);
         } catch (Exception e) {
-            Toast.makeText(this, "No se pudieron abrir Ajustes", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,
+                    "No se pudieron abrir Ajustes",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
