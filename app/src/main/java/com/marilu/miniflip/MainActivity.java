@@ -1,6 +1,7 @@
 package com.marilu.miniflip;
 
 import android.app.Activity;
+import android.app.ActivityOptions;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -8,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -15,6 +17,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
 import android.widget.EditText;
@@ -23,7 +26,6 @@ import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -41,29 +43,28 @@ public class MainActivity extends Activity {
 
     private static final int PAGE_HOME = 0;
     private static final int PAGE_APPS = 1;
-    private static final int PAGE_RECENTS = 2;
     private static final int REQUEST_WALLPAPER = 7001;
-    private static final int FAVORITE_SLOTS = 8;
+    private static final int HOME_SLOTS = 8;
+    private static final int DOCK_SLOTS = 5;
+    private static final int COVER_DISPLAY_ID = 1;
 
     private static final String PREFS = "miniflip_prefs";
-    private static final String RECENTS = "recents";
     private static final String WALLPAPER_URI = "wallpaper_uri";
-    private static final String FAVORITE_PREFIX = "favorite_";
+    private static final String HOME_PREFIX = "home_";
+    private static final String DOCK_PREFIX = "dock_";
+    private static final String OLD_FAVORITE_PREFIX = "favorite_";
 
     private final List<AppEntry> allApps = new ArrayList<>();
     private FrameLayout content;
-    private LinearLayout homePage;
-    private LinearLayout appsPage;
-    private LinearLayout recentsPage;
-    private GridLayout favoritesGrid;
+    private FrameLayout homePage;
+    private FrameLayout appsPage;
+    private GridLayout homeGrid;
     private GridLayout appsGrid;
-    private GridLayout recentsGrid;
+    private LinearLayout dock;
     private EditText search;
     private ImageView wallpaperView;
-    private TextView navHome;
-    private TextView navApps;
-    private TextView navRecents;
     private int currentPage = PAGE_HOME;
+    private long dockTouchStart;
 
     private int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
@@ -78,6 +79,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(Color.BLACK);
         loadLauncherApps();
         buildUi();
+        RotationController.startRotationEnforcer(this);
         showPage(resolveRequestedPage(getIntent()));
     }
 
@@ -89,24 +91,10 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_WALLPAPER && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            Uri uri = data.getData();
-            try {
-                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                getContentResolver().takePersistableUriPermission(uri, flags & Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (Exception ignored) {}
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(WALLPAPER_URI, uri.toString()).apply();
-            applySavedWallpaper();
-        }
-    }
-
-    private int resolveRequestedPage(Intent intent) {
-        if (intent == null) return PAGE_HOME;
-        int page = intent.getIntExtra(EXTRA_PAGE, PAGE_HOME);
-        if (page < PAGE_HOME || page > PAGE_RECENTS) return PAGE_HOME;
-        return page;
+    protected void onResume() {
+        super.onResume();
+        applyImmersiveMode();
+        RotationController.startRotationEnforcer(this);
     }
 
     @Override
@@ -116,10 +104,23 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        applyImmersiveMode();
-        if (currentPage == PAGE_RECENTS && recentsGrid != null) renderRecents();
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WALLPAPER && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+                getContentResolver().takePersistableUriPermission(uri, flags);
+            } catch (Exception ignored) {}
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(WALLPAPER_URI, uri.toString()).apply();
+            applySavedWallpaper();
+        }
+    }
+
+    private int resolveRequestedPage(Intent intent) {
+        if (intent == null) return PAGE_HOME;
+        int page = intent.getIntExtra(EXTRA_PAGE, PAGE_HOME);
+        return page == PAGE_APPS ? PAGE_APPS : PAGE_HOME;
     }
 
     private void applyImmersiveMode() {
@@ -143,108 +144,116 @@ public class MainActivity extends Activity {
         shell.addView(wallpaperView, new FrameLayout.LayoutParams(-1, -1));
 
         View scrim = new View(this);
-        scrim.setBackgroundColor(Color.argb(105, 0, 0, 0));
+        scrim.setBackgroundColor(Color.argb(45, 0, 0, 0));
         shell.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(8), dp(6), dp(8), dp(5));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(4), 0, dp(4), 0);
-
-        TextView title = new TextView(this);
-        title.setText("MiniFlip OS");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(18);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(38), 1f));
-
-        TextView editButton = makeHeaderButton("Editar", 11);
-        editButton.setOnClickListener(v -> showFavoriteManager());
-        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(58), dp(34));
-        editParams.setMargins(0, 0, dp(5), 0);
-        header.addView(editButton, editParams);
-
-        TextView settingsButton = makeHeaderButton("⚙", 18);
-        settingsButton.setOnClickListener(v -> showMiniFlipSettings());
-        header.addView(settingsButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(42)));
-
         content = new FrameLayout(this);
-        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
+        shell.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
         homePage = buildHomePage();
         appsPage = buildAppsPage();
-        recentsPage = buildRecentsPage();
         content.addView(homePage, new FrameLayout.LayoutParams(-1, -1));
         content.addView(appsPage, new FrameLayout.LayoutParams(-1, -1));
-        content.addView(recentsPage, new FrameLayout.LayoutParams(-1, -1));
 
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        nav.setPadding(dp(2), dp(2), 0, dp(2));
-
-        navHome = makeNavButton("Inicio");
-        navApps = makeNavButton("Apps");
-        navRecents = makeNavButton("Rec.");
-        navHome.setOnClickListener(v -> showPage(PAGE_HOME));
-        navApps.setOnClickListener(v -> showPage(PAGE_APPS));
-        navRecents.setOnClickListener(v -> showPage(PAGE_RECENTS));
-
-        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(54), dp(31));
-        p1.setMargins(0, 0, dp(4), 0);
-        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(50), dp(31));
-        p2.setMargins(0, 0, dp(4), 0);
-        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(54), dp(31));
-        p3.setMargins(0, 0, dp(4), 0);
-
-        nav.addView(navHome, p1);
-        nav.addView(navApps, p2);
-        nav.addView(navRecents, p3);
-        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(31), 1f));
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(36)));
-
-        shell.addView(root, new FrameLayout.LayoutParams(-1, -1));
         setContentView(shell);
         applySavedWallpaper();
     }
 
-    private LinearLayout buildHomePage() {
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(2), dp(2), dp(2), dp(1));
+    private FrameLayout buildHomePage() {
+        FrameLayout page = new FrameLayout(this);
+        page.setClipChildren(false);
+        page.setClipToPadding(false);
 
-        TextView label = new TextView(this);
-        label.setText("Favoritos");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(12);
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(26)));
+        TextView title = new TextView(this);
+        title.setText("Irving OS");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(17);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setShadowLayer(5f, 0f, 1f, Color.BLACK);
+        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(dp(130), dp(38), Gravity.TOP | Gravity.START);
+        titleLp.leftMargin = dp(12);
+        titleLp.topMargin = dp(7);
+        page.addView(title, titleLp);
 
-        favoritesGrid = new GridLayout(this);
-        favoritesGrid.setColumnCount(4);
-        favoritesGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        favoritesGrid.setUseDefaultMargins(false);
-        page.addView(favoritesGrid, new LinearLayout.LayoutParams(-1, dp(176)));
-        renderFavorites();
+        homeGrid = new GridLayout(this);
+        homeGrid.setColumnCount(4);
+        homeGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
+        homeGrid.setUseDefaultMargins(false);
+        FrameLayout.LayoutParams gridLp = new FrameLayout.LayoutParams(-1, dp(174), Gravity.TOP);
+        gridLp.leftMargin = dp(8);
+        gridLp.rightMargin = dp(8);
+        gridLp.topMargin = dp(48);
+        page.addView(homeGrid, gridLp);
+        renderHomeShortcuts();
 
-        TextView tip = new TextView(this);
-        tip.setText("Mantén pulsado un icono para cambiarlo");
-        tip.setTextColor(Color.LTGRAY);
-        tip.setTextSize(9);
-        tip.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        page.addView(tip, new LinearLayout.LayoutParams(-1, 0, 1f));
+        dock = new LinearLayout(this);
+        dock.setOrientation(LinearLayout.HORIZONTAL);
+        dock.setGravity(Gravity.CENTER);
+        dock.setPadding(dp(5), dp(4), dp(5), dp(4));
+        dock.setClipChildren(false);
+        dock.setClipToPadding(false);
+        dock.setBackground(rounded(Color.argb(210, 37, 39, 48), 18));
+        FrameLayout.LayoutParams dockLp = new FrameLayout.LayoutParams(-1, dp(70), Gravity.BOTTOM | Gravity.START);
+        dockLp.leftMargin = dp(7);
+        dockLp.rightMargin = dp(112);
+        dockLp.bottomMargin = dp(8);
+        page.addView(dock, dockLp);
+        renderDock();
+        installDockTouchBehavior();
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+        controls.setPadding(dp(2), dp(2), dp(2), dp(2));
+        controls.setBackground(rounded(Color.argb(195, 29, 30, 37), 14));
+
+        TextView appsButton = compactControl("Apps", 10);
+        appsButton.setOnClickListener(v -> showPage(PAGE_APPS));
+        controls.addView(appsButton, new LinearLayout.LayoutParams(dp(46), dp(38)));
+
+        TextView settingsButton = compactControl("⚙", 18);
+        settingsButton.setOnClickListener(v -> showIrvingSettings());
+        LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(dp(42), dp(38));
+        settingsLp.leftMargin = dp(4);
+        controls.addView(settingsButton, settingsLp);
+
+        FrameLayout.LayoutParams controlsLp = new FrameLayout.LayoutParams(dp(98), dp(44), Gravity.END | Gravity.BOTTOM);
+        controlsLp.rightMargin = dp(6);
+        controlsLp.bottomMargin = dp(84);
+        page.addView(controls, controlsLp);
+
         return page;
     }
 
-    private LinearLayout buildAppsPage() {
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
+    private FrameLayout buildAppsPage() {
+        FrameLayout page = new FrameLayout(this);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(8), dp(6), dp(8), dp(4));
+        page.addView(root, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView back = compactControl("Inicio", 10);
+        back.setOnClickListener(v -> showPage(PAGE_HOME));
+        header.addView(back, new LinearLayout.LayoutParams(dp(54), dp(34)));
+
+        TextView label = new TextView(this);
+        label.setText("Aplicaciones");
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(16);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setGravity(Gravity.CENTER);
+        header.addView(label, new LinearLayout.LayoutParams(0, dp(36), 1f));
+
+        TextView settings = compactControl("⚙", 18);
+        settings.setOnClickListener(v -> showIrvingSettings());
+        header.addView(settings, new LinearLayout.LayoutParams(dp(40), dp(34)));
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(40)));
 
         search = new EditText(this);
         search.setSingleLine(true);
@@ -253,17 +262,21 @@ public class MainActivity extends Activity {
         search.setTextColor(Color.WHITE);
         search.setTextSize(13);
         search.setPadding(dp(12), 0, dp(12), 0);
-        search.setBackgroundColor(Color.argb(205, 28, 28, 34));
-        page.addView(search, new LinearLayout.LayoutParams(-1, dp(40)));
+        search.setBackground(rounded(Color.argb(215, 25, 26, 32), 14));
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(-1, dp(40));
+        searchLp.setMargins(0, dp(3), 0, dp(3));
+        root.addView(search, searchLp);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, dp(92));
         appsGrid = new GridLayout(this);
         appsGrid.setColumnCount(4);
         appsGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
         appsGrid.setUseDefaultMargins(false);
         scroll.addView(appsGrid, new ScrollView.LayoutParams(-1, -2));
-        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         renderApps("");
         search.addTextChangedListener(new TextWatcher() {
@@ -276,104 +289,342 @@ public class MainActivity extends Activity {
         return page;
     }
 
-    private LinearLayout buildRecentsPage() {
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-
-        TextView label = new TextView(this);
-        label.setText("Abiertas desde MiniFlip");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(12);
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(26)));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        recentsGrid = new GridLayout(this);
-        recentsGrid.setColumnCount(4);
-        recentsGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        recentsGrid.setUseDefaultMargins(false);
-        scroll.addView(recentsGrid, new ScrollView.LayoutParams(-1, -2));
-        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-        renderRecents();
-        return page;
-    }
-
     private void showPage(int page) {
-        currentPage = page;
-        if (homePage != null) homePage.setVisibility(page == PAGE_HOME ? View.VISIBLE : View.GONE);
-        if (appsPage != null) appsPage.setVisibility(page == PAGE_APPS ? View.VISIBLE : View.GONE);
-        if (recentsPage != null) recentsPage.setVisibility(page == PAGE_RECENTS ? View.VISIBLE : View.GONE);
-        if (page == PAGE_HOME) renderFavorites();
-        if (page == PAGE_RECENTS) renderRecents();
-        updateNav();
+        currentPage = page == PAGE_APPS ? PAGE_APPS : PAGE_HOME;
+        if (homePage != null) homePage.setVisibility(currentPage == PAGE_HOME ? View.VISIBLE : View.GONE);
+        if (appsPage != null) appsPage.setVisibility(currentPage == PAGE_APPS ? View.VISIBLE : View.GONE);
+        if (currentPage == PAGE_HOME) {
+            renderHomeShortcuts();
+            renderDock();
+        }
         applyImmersiveMode();
     }
 
-    private void updateNav() {
-        if (navHome == null) return;
-        styleNav(navHome, currentPage == PAGE_HOME);
-        styleNav(navApps, currentPage == PAGE_APPS);
-        styleNav(navRecents, currentPage == PAGE_RECENTS);
-    }
-
-    private void styleNav(TextView v, boolean selected) {
-        v.setTextColor(Color.WHITE);
-        v.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-        v.setBackgroundColor(selected ? Color.argb(235, 45, 45, 56) : Color.argb(205, 22, 22, 28));
-    }
-
-    private TextView makeNavButton(String text) {
-        TextView v = new TextView(this);
-        v.setText(text);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(10);
-        v.setGravity(Gravity.CENTER);
-        v.setPadding(dp(2), 0, dp(2), 0);
-        return v;
-    }
-
-    private TextView makeHeaderButton(String text, int textSize) {
+    private TextView compactControl(String text, int textSize) {
         TextView v = new TextView(this);
         v.setText(text);
         v.setTextColor(Color.WHITE);
         v.setTextSize(textSize);
         v.setGravity(Gravity.CENTER);
-        v.setBackgroundColor(Color.argb(220, 31, 31, 38));
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setBackground(rounded(Color.argb(220, 45, 46, 56), 11));
         return v;
     }
 
-    private void renderFavorites() {
-        if (favoritesGrid == null) return;
-        favoritesGrid.removeAllViews();
-        for (int i = 0; i < FAVORITE_SLOTS; i++) favoritesGrid.addView(makeFavoriteSlot(i));
+    private GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(radiusDp));
+        return bg;
     }
 
-    private View makeFavoriteSlot(final int slot) {
-        AppEntry app = getFavoriteApp(slot);
-        LinearLayout box = baseTile(86);
+    private void renderHomeShortcuts() {
+        if (homeGrid == null) return;
+        homeGrid.removeAllViews();
+        for (int i = 0; i < HOME_SLOTS; i++) homeGrid.addView(makeHomeSlot(i));
+    }
 
+    private View makeHomeSlot(final int slot) {
+        AppEntry app = getHomeApp(slot);
+        LinearLayout box = baseTile(84);
         if (app == null) {
             TextView plus = new TextView(this);
             plus.setText("+");
             plus.setTextColor(Color.WHITE);
-            plus.setTextSize(28);
+            plus.setTextSize(27);
             plus.setGravity(Gravity.CENTER);
-            plus.setBackgroundColor(Color.argb(125, 45, 45, 55));
-            box.addView(plus, new LinearLayout.LayoutParams(dp(40), dp(40)));
-            box.addView(tileLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(26)));
-            box.setOnClickListener(v -> chooseFavoriteForSlot(slot));
+            plus.setBackground(rounded(Color.argb(120, 45, 45, 54), 14));
+            box.addView(plus, new LinearLayout.LayoutParams(dp(42), dp(42)));
+            box.addView(tileLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(25)));
+            box.setOnClickListener(v -> chooseAppForHomeSlot(slot));
             return box;
         }
 
         ImageView icon = new ImageView(this);
         icon.setImageDrawable(app.icon);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(26)));
+        box.addView(icon, new LinearLayout.LayoutParams(dp(43), dp(43)));
+        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(25)));
         box.setOnClickListener(v -> openApp(app));
-        box.setOnLongClickListener(v -> { chooseFavoriteForSlot(slot); return true; });
+        box.setOnLongClickListener(v -> { chooseAppForHomeSlot(slot); return true; });
         return box;
+    }
+
+    private void renderDock() {
+        if (dock == null) return;
+        dock.removeAllViews();
+        for (int i = 0; i < DOCK_SLOTS; i++) {
+            AppEntry app = getDockApp(i);
+            dock.addView(makeDockItem(app, i), new LinearLayout.LayoutParams(0, dp(62), 1f));
+        }
+        dock.addView(makeDockEditItem(), new LinearLayout.LayoutParams(0, dp(62), 1f));
+    }
+
+    private View makeDockItem(AppEntry app, int slot) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setPadding(dp(1), dp(2), dp(1), dp(1));
+        item.setTag(slot);
+        item.setClickable(false);
+
+        if (app == null) {
+            TextView plus = new TextView(this);
+            plus.setText("+");
+            plus.setTextColor(Color.WHITE);
+            plus.setTextSize(22);
+            plus.setGravity(Gravity.CENTER);
+            plus.setBackground(rounded(Color.argb(120, 70, 70, 82), 10));
+            item.addView(plus, new LinearLayout.LayoutParams(dp(31), dp(31)));
+            item.addView(dockLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(19)));
+        } else {
+            ImageView icon = new ImageView(this);
+            icon.setImageDrawable(app.icon);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            item.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+            item.addView(dockLabel(shortLabel(app.label)), new LinearLayout.LayoutParams(-1, dp(19)));
+        }
+        return item;
+    }
+
+    private View makeDockEditItem() {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setClickable(false);
+        item.setTag(DOCK_SLOTS);
+
+        TextView icon = new TextView(this);
+        icon.setText("✎");
+        icon.setTextColor(Color.WHITE);
+        icon.setTextSize(20);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(rounded(Color.argb(170, 74, 78, 95), 10));
+        item.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        item.addView(dockLabel("Editar"), new LinearLayout.LayoutParams(-1, dp(19)));
+        return item;
+    }
+
+    private TextView dockLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(7);
+        label.setGravity(Gravity.CENTER);
+        label.setMaxLines(1);
+        return label;
+    }
+
+    private String shortLabel(String label) {
+        if (label == null) return "";
+        return label.length() > 9 ? label.substring(0, 8) + "…" : label;
+    }
+
+    private void installDockTouchBehavior() {
+        dock.setOnTouchListener((v, event) -> {
+            if (dock.getChildCount() == 0 || dock.getWidth() <= 0) return true;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    dockTouchStart = System.currentTimeMillis();
+                    magnifyDockAt(event.getX());
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    magnifyDockAt(event.getX());
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    int index = dockIndexAt(event.getX());
+                    long held = System.currentTimeMillis() - dockTouchStart;
+                    restoreDockScale();
+                    if (index >= 0 && index < DOCK_SLOTS) {
+                        if (held >= 650) chooseAppForDockSlot(index);
+                        else {
+                            AppEntry app = getDockApp(index);
+                            if (app == null) chooseAppForDockSlot(index);
+                            else openApp(app);
+                        }
+                    } else if (index == DOCK_SLOTS) {
+                        showDockManager();
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    restoreDockScale();
+                    return true;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    private int dockIndexAt(float x) {
+        int count = dock.getChildCount();
+        if (count <= 0 || dock.getWidth() <= 0) return -1;
+        int index = (int) (x / ((float) dock.getWidth() / count));
+        if (index < 0) index = 0;
+        if (index >= count) index = count - 1;
+        return index;
+    }
+
+    private void magnifyDockAt(float x) {
+        int count = dock.getChildCount();
+        if (count <= 0) return;
+        float cell = dock.getWidth() / (float) count;
+        for (int i = 0; i < count; i++) {
+            View child = dock.getChildAt(i);
+            float center = cell * (i + 0.5f);
+            float distance = Math.abs(x - center) / Math.max(1f, cell);
+            float scale;
+            if (distance < 0.55f) scale = 1.38f;
+            else if (distance < 1.25f) scale = 1.20f;
+            else scale = 1.0f;
+            child.animate().scaleX(scale).scaleY(scale).translationY(scale > 1f ? -dp(5) : 0).setDuration(70).start();
+        }
+    }
+
+    private void restoreDockScale() {
+        for (int i = 0; i < dock.getChildCount(); i++) {
+            dock.getChildAt(i).animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(120).start();
+        }
+    }
+
+    private void showDockManager() {
+        String[] rows = new String[DOCK_SLOTS];
+        for (int i = 0; i < DOCK_SLOTS; i++) {
+            AppEntry app = getDockApp(i);
+            rows[i] = "Posición " + (i + 1) + " · " + (app == null ? "Vacía" : app.label);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Editar Dock")
+                .setItems(rows, (dialog, which) -> chooseAppForDockSlot(which))
+                .setNegativeButton("Cerrar", null)
+                .show();
+    }
+
+    private void showHomeManager() {
+        String[] rows = new String[HOME_SLOTS];
+        for (int i = 0; i < HOME_SLOTS; i++) {
+            AppEntry app = getHomeApp(i);
+            rows[i] = "Espacio " + (i + 1) + " · " + (app == null ? "Vacío" : app.label);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Editar pantalla principal")
+                .setItems(rows, (dialog, which) -> chooseAppForHomeSlot(which))
+                .setNegativeButton("Cerrar", null)
+                .show();
+    }
+
+    private void chooseAppForHomeSlot(int slot) {
+        chooseAppForSlot("Elegir aplicación para Inicio", HOME_PREFIX, slot, this::renderHomeShortcuts);
+    }
+
+    private void chooseAppForDockSlot(int slot) {
+        chooseAppForSlot("Elegir aplicación para Dock", DOCK_PREFIX, slot, this::renderDock);
+    }
+
+    private void chooseAppForSlot(String title, String prefix, int slot, Runnable afterSave) {
+        String[] items = new String[allApps.size() + 1];
+        items[0] = "Vaciar este espacio";
+        for (int i = 0; i < allApps.size(); i++) items[i + 1] = allApps.get(i).label;
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setItems(items, (dialog, which) -> {
+                    SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+                    if (which == 0) editor.putString(prefix + slot, "");
+                    else {
+                        AppEntry app = allApps.get(which - 1);
+                        editor.putString(prefix + slot, app.packageName + "\n" + app.activityName);
+                    }
+                    editor.apply();
+                    afterSave.run();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private AppEntry getHomeApp(int slot) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String key = HOME_PREFIX + slot;
+        if (!prefs.contains(key) && prefs.contains(OLD_FAVORITE_PREFIX + slot)) {
+            String old = prefs.getString(OLD_FAVORITE_PREFIX + slot, "");
+            prefs.edit().putString(key, old == null ? "" : old).apply();
+        }
+        String defaultPkg = slot == 0 ? "com.whatsapp" : slot == 1 ? "com.android.chrome" : slot == 2 ? "com.google.android.youtube" : null;
+        return getSavedApp(HOME_PREFIX, slot, defaultPkg);
+    }
+
+    private AppEntry getDockApp(int slot) {
+        String defaultPkg = slot == 0 ? "com.whatsapp" : slot == 1 ? "com.android.chrome" : slot == 2 ? "com.google.android.youtube" : null;
+        return getSavedApp(DOCK_PREFIX, slot, defaultPkg);
+    }
+
+    private AppEntry getSavedApp(String prefix, int slot, String defaultPkg) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String key = prefix + slot;
+        if (!prefs.contains(key)) return defaultPkg == null ? null : findByPackage(defaultPkg);
+        String raw = prefs.getString(key, "");
+        if (raw == null || raw.isEmpty()) return null;
+        String[] parts = raw.split("\n", 2);
+        if (parts.length == 2) {
+            AppEntry exact = findByComponent(parts[0], parts[1]);
+            if (exact != null) return exact;
+        }
+        return findByPackage(parts[0]);
+    }
+
+    private void renderApps(String query) {
+        if (appsGrid == null) return;
+        appsGrid.removeAllViews();
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        for (AppEntry app : allApps) {
+            if (!q.isEmpty() && !app.label.toLowerCase(Locale.ROOT).contains(q)) continue;
+            appsGrid.addView(makeAppTile(app));
+        }
+    }
+
+    private View makeAppTile(AppEntry app) {
+        LinearLayout box = baseTile(86);
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(app.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(27)));
+        box.setOnClickListener(v -> openApp(app));
+        box.setOnLongClickListener(v -> {
+            showAddAppDialog(app);
+            return true;
+        });
+        return box;
+    }
+
+    private void showAddAppDialog(AppEntry app) {
+        String[] options = {"Agregar a pantalla principal", "Agregar al Dock"};
+        new AlertDialog.Builder(this)
+                .setTitle(app.label)
+                .setItems(options, (d, which) -> {
+                    if (which == 0) chooseDestinationForApp(app, HOME_PREFIX, HOME_SLOTS, "Pantalla principal");
+                    else chooseDestinationForApp(app, DOCK_PREFIX, DOCK_SLOTS, "Dock");
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void chooseDestinationForApp(AppEntry app, String prefix, int slots, String title) {
+        String[] rows = new String[slots];
+        for (int i = 0; i < slots; i++) {
+            AppEntry existing = prefix.equals(DOCK_PREFIX) ? getDockApp(i) : getHomeApp(i);
+            rows[i] = "Posición " + (i + 1) + " · " + (existing == null ? "Vacía" : existing.label);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Agregar a " + title)
+                .setItems(rows, (d, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString(prefix + which, app.packageName + "\n" + app.activityName)
+                            .apply();
+                    if (prefix.equals(DOCK_PREFIX)) renderDock(); else renderHomeShortcuts();
+                    Toast.makeText(this, app.label + " agregada", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     private TextView tileLabel(String text) {
@@ -383,75 +634,42 @@ public class MainActivity extends Activity {
         label.setTextSize(9);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(2);
+        label.setShadowLayer(4f, 0f, 1f, Color.BLACK);
         return label;
     }
 
-    private void showFavoriteManager() {
-        String[] rows = new String[FAVORITE_SLOTS];
-        for (int i = 0; i < FAVORITE_SLOTS; i++) {
-            AppEntry app = getFavoriteApp(i);
-            rows[i] = "Espacio " + (i + 1) + " · " + (app == null ? "Vacío" : app.label);
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Editar favoritos")
-                .setItems(rows, (dialog, which) -> chooseFavoriteForSlot(which))
-                .setNegativeButton("Cerrar", null)
-                .show();
+    private LinearLayout baseTile(int heightDp) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(2), dp(4), dp(2), dp(2));
+        GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
+        gp.width = 0;
+        gp.height = dp(heightDp);
+        gp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        gp.setMargins(dp(1), dp(1), dp(1), dp(1));
+        box.setLayoutParams(gp);
+        return box;
     }
 
-    private void chooseFavoriteForSlot(final int slot) {
-        String[] items = new String[allApps.size() + 1];
-        items[0] = "Vaciar este espacio";
-        for (int i = 0; i < allApps.size(); i++) items[i + 1] = allApps.get(i).label;
-
+    private void showIrvingSettings() {
+        String[] items = {
+                "Editar pantalla principal",
+                "Editar Dock",
+                "Cambiar imagen de fondo",
+                "Quitar imagen de fondo",
+                "Activar rotación forzada en pantalla externa",
+                "Ajustes del teléfono"
+        };
         new AlertDialog.Builder(this)
-                .setTitle("Elegir aplicación")
+                .setTitle("Irving OS")
                 .setItems(items, (dialog, which) -> {
-                    SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-                    if (which == 0) editor.putString(FAVORITE_PREFIX + slot, "");
-                    else {
-                        AppEntry app = allApps.get(which - 1);
-                        editor.putString(FAVORITE_PREFIX + slot, app.packageName + "\n" + app.activityName);
-                    }
-                    editor.apply();
-                    renderFavorites();
-                })
-                .setNegativeButton("Cancelar", null)
-                .show();
-    }
-
-    private AppEntry getFavoriteApp(int slot) {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String key = FAVORITE_PREFIX + slot;
-        String raw;
-        if (prefs.contains(key)) {
-            raw = prefs.getString(key, "");
-            if (raw == null || raw.isEmpty()) return null;
-        } else {
-            if (slot == 0) return findByPackage("com.whatsapp");
-            if (slot == 1) return findByPackage("com.android.chrome");
-            if (slot == 2) return findByPackage("com.google.android.youtube");
-            return null;
-        }
-
-        String[] parts = raw.split("\n", 2);
-        if (parts.length == 2) {
-            AppEntry exact = findByComponent(parts[0], parts[1]);
-            if (exact != null) return exact;
-        }
-        return findByPackage(parts[0]);
-    }
-
-    private void showMiniFlipSettings() {
-        String[] items = {"Editar favoritos", "Cambiar imagen de fondo", "Quitar imagen de fondo", "Activar rotación automática", "Ajustes del teléfono"};
-        new AlertDialog.Builder(this)
-                .setTitle("MiniFlip OS")
-                .setItems(items, (dialog, which) -> {
-                    if (which == 0) showFavoriteManager();
-                    else if (which == 1) pickWallpaper();
-                    else if (which == 2) clearMiniFlipWallpaper();
-                    else if (which == 3) enableSystemAutoRotate();
-                    else if (which == 4) openSettings();
+                    if (which == 0) showHomeManager();
+                    else if (which == 1) showDockManager();
+                    else if (which == 2) pickWallpaper();
+                    else if (which == 3) clearWallpaper();
+                    else if (which == 4) enableForcedRotation();
+                    else if (which == 5) openSettings();
                 })
                 .setNegativeButton("Cerrar", null)
                 .show();
@@ -465,10 +683,12 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_WALLPAPER);
     }
 
-    private void clearMiniFlipWallpaper() {
+    private void clearWallpaper() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
-        wallpaperView.setImageDrawable(null);
-        wallpaperView.setBackgroundColor(Color.BLACK);
+        if (wallpaperView != null) {
+            wallpaperView.setImageDrawable(null);
+            wallpaperView.setBackgroundColor(Color.BLACK);
+        }
     }
 
     private void applySavedWallpaper() {
@@ -482,25 +702,18 @@ public class MainActivity extends Activity {
         try {
             wallpaperView.setImageURI(Uri.parse(saved));
         } catch (Exception e) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
-            wallpaperView.setImageDrawable(null);
-            wallpaperView.setBackgroundColor(Color.BLACK);
+            clearWallpaper();
         }
     }
 
-    private void enableSystemAutoRotate() {
-        try {
-            if (!Settings.System.canWrite(this)) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()));
-                startActivity(intent);
-                Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' y vuelve a MiniFlip", Toast.LENGTH_LONG).show();
-                return;
-            }
-            Settings.System.putInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 1);
-            Toast.makeText(this, "Rotación automática activada", Toast.LENGTH_SHORT).show();
-        } catch (Exception e) {
-            Toast.makeText(this, "No se pudo cambiar la rotación", Toast.LENGTH_SHORT).show();
+    private void enableForcedRotation() {
+        if (!RotationController.canWrite(this)) {
+            startActivity(RotationController.permissionIntent(this));
+            Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' y vuelve a Irving OS", Toast.LENGTH_LONG).show();
+            return;
         }
+        RotationController.startRotationEnforcer(this);
+        Toast.makeText(this, "Rotación de pantalla externa activada", Toast.LENGTH_SHORT).show();
     }
 
     private void loadLauncherApps() {
@@ -528,110 +741,34 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void renderApps(String query) {
-        if (appsGrid == null) return;
-        appsGrid.removeAllViews();
-        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-        for (AppEntry app : allApps) {
-            if (!q.isEmpty() && !app.label.toLowerCase(Locale.ROOT).contains(q)) continue;
-            appsGrid.addView(makeTile(app));
-        }
-    }
-
-    private void renderRecents() {
-        if (recentsGrid == null) return;
-        recentsGrid.removeAllViews();
-        List<String> recentPkgs = getRecentPackages();
-        int added = 0;
-        for (String pkg : recentPkgs) {
-            if ("__settings__".equals(pkg)) {
-                recentsGrid.addView(makeSettingsTile());
-                added++;
-                continue;
-            }
-            AppEntry app = findByPackage(pkg);
-            if (app != null) {
-                recentsGrid.addView(makeTile(app));
-                added++;
-            }
-        }
-        if (added == 0) {
-            TextView empty = new TextView(this);
-            empty.setText("Aquí aparecerán las aplicaciones que abras desde MiniFlip OS.");
-            empty.setTextColor(Color.LTGRAY);
-            empty.setTextSize(11);
-            empty.setGravity(Gravity.CENTER);
-            GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
-            gp.width = -1;
-            gp.height = dp(100);
-            gp.columnSpec = GridLayout.spec(0, 4);
-            empty.setLayoutParams(gp);
-            recentsGrid.addView(empty);
-        }
-    }
-
     private AppEntry findByPackage(String packageName) {
         for (AppEntry app : allApps) if (app.packageName.equals(packageName)) return app;
         return null;
     }
 
     private AppEntry findByComponent(String packageName, String activityName) {
-        for (AppEntry app : allApps) if (app.packageName.equals(packageName) && app.activityName.equals(activityName)) return app;
+        for (AppEntry app : allApps) {
+            if (app.packageName.equals(packageName) && app.activityName.equals(activityName)) return app;
+        }
         return null;
     }
 
-    private View makeTile(AppEntry app) {
-        LinearLayout box = baseTile(86);
-        ImageView icon = new ImageView(this);
-        icon.setImageDrawable(app.icon);
-        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(26)));
-        box.setOnClickListener(v -> openApp(app));
-        return box;
-    }
-
-    private View makeSettingsTile() {
-        LinearLayout box = baseTile(86);
-        TextView icon = new TextView(this);
-        icon.setText("⚙");
-        icon.setTextColor(Color.WHITE);
-        icon.setTextSize(28);
-        icon.setGravity(Gravity.CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-        box.addView(tileLabel("Ajustes"), new LinearLayout.LayoutParams(-1, dp(26)));
-        box.setOnClickListener(v -> openSettings());
-        return box;
-    }
-
-    private LinearLayout baseTile(int heightDp) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setGravity(Gravity.CENTER);
-        box.setPadding(dp(2), dp(5), dp(2), dp(3));
-        GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
-        gp.width = 0;
-        gp.height = dp(heightDp);
-        gp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        gp.setMargins(dp(1), dp(1), dp(1), dp(1));
-        box.setLayoutParams(gp);
-        return box;
-    }
-
     private void openApp(AppEntry app) {
-        saveRecent(app.packageName);
+        RotationController.startRotationEnforcer(this);
         try {
             Intent i = new Intent(Intent.ACTION_MAIN);
             i.addCategory(Intent.CATEGORY_LAUNCHER);
             i.setClassName(app.packageName, app.activityName);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+            startActivity(i, options);
         } catch (Exception e) {
             try {
                 Intent fallback = getPackageManager().getLaunchIntentForPackage(app.packageName);
                 if (fallback != null) {
-                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(fallback);
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                    Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+                    startActivity(fallback, options);
                     return;
                 }
             } catch (Exception ignored) {}
@@ -640,32 +777,13 @@ public class MainActivity extends Activity {
     }
 
     private void openSettings() {
-        saveRecent("__settings__");
-        try { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
-        catch (Exception e) { Toast.makeText(this, "No se pudieron abrir Ajustes", Toast.LENGTH_SHORT).show(); }
-    }
-
-    private void saveRecent(String packageName) {
-        List<String> current = getRecentPackages();
-        current.remove(packageName);
-        current.add(0, packageName);
-        while (current.size() > 12) current.remove(current.size() - 1);
-        StringBuilder joined = new StringBuilder();
-        for (String s : current) {
-            if (joined.length() > 0) joined.append('|');
-            joined.append(s);
+        RotationController.startRotationEnforcer(this);
+        try {
+            Bundle options = ActivityOptions.makeBasic().setLaunchDisplayId(COVER_DISPLAY_ID).toBundle();
+            startActivity(new Intent(Settings.ACTION_SETTINGS), options);
+        } catch (Exception e) {
+            Toast.makeText(this, "No se pudieron abrir Ajustes", Toast.LENGTH_SHORT).show();
         }
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(RECENTS, joined.toString()).apply();
-    }
-
-    private List<String> getRecentPackages() {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String raw = prefs.getString(RECENTS, "");
-        List<String> list = new ArrayList<>();
-        if (raw == null || raw.isEmpty()) return list;
-        String[] parts = raw.split("\\|");
-        Collections.addAll(list, parts);
-        return list;
     }
 
     private static class AppEntry {
