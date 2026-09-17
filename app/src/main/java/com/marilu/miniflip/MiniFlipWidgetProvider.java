@@ -28,8 +28,7 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
 
             views.setOnClickPendingIntent(R.id.widget_home, mainPendingIntent(context, appWidgetId * 100 + 1, 0));
             views.setOnClickPendingIntent(R.id.widget_apps, mainPendingIntent(context, appWidgetId * 100 + 2, 1));
-            views.setOnClickPendingIntent(R.id.widget_recents, mainPendingIntent(context, appWidgetId * 100 + 3, 2));
-            views.setOnClickPendingIntent(R.id.widget_settings, settingsPendingIntent(context, appWidgetId * 100 + 4));
+            views.setOnClickPendingIntent(R.id.widget_settings, settingsPendingIntent(context, appWidgetId * 100 + 3));
 
             appWidgetManager.updateAppWidget(appWidgetId, views);
             appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_app_grid);
