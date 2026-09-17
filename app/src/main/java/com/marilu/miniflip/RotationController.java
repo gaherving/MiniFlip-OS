@@ -1,5 +1,6 @@
 package com.marilu.miniflip;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -27,6 +28,8 @@ import rikka.shizuku.Shizuku;
 
 public final class RotationController {
     private static final String CHANNEL_ID = "irving_rotation";
+    private static final String EXTRA_DISPLAY_ID = "irving_cover_display_id";
+    private static final int FALLBACK_COVER_DISPLAY_ID = 1;
 
     private RotationController() {}
 
@@ -54,6 +57,15 @@ public final class RotationController {
     public static void startRotationEnforcer(Context context) {
         try {
             Intent service = new Intent(context, EnforcerService.class);
+            int displayId = FALLBACK_COVER_DISPLAY_ID;
+            if (context instanceof Activity) {
+                Display display = ((Activity) context).getDisplay();
+                if (display != null && display.getDisplayId() != Display.DEFAULT_DISPLAY) {
+                    displayId = display.getDisplayId();
+                }
+            }
+            service.putExtra(EXTRA_DISPLAY_ID, displayId);
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(service);
             } else {
@@ -75,6 +87,7 @@ public final class RotationController {
         private DisplayManager displayManager;
         private final ExecutorService shellExecutor = Executors.newSingleThreadExecutor();
 
+        private int coverDisplayId = FALLBACK_COVER_DISPLAY_ID;
         private int lastRotation = -1;
         private long lastChangeAt = 0L;
         private boolean externalRotationPrepared = false;
@@ -106,16 +119,24 @@ public final class RotationController {
                     sensorManager.registerListener(
                             this,
                             accelerometer,
-                            SensorManager.SENSOR_DELAY_UI
+                            SensorManager.SENSOR_DELAY_GAME
                     );
                 }
             }
-
-            prepareExternalDisplayRotation();
         }
 
         @Override
         public int onStartCommand(Intent intent, int flags, int startId) {
+            if (intent != null) {
+                int requested = intent.getIntExtra(EXTRA_DISPLAY_ID, FALLBACK_COVER_DISPLAY_ID);
+                if (requested >= 0 && requested != Display.DEFAULT_DISPLAY) {
+                    if (coverDisplayId != requested) {
+                        coverDisplayId = requested;
+                        externalRotationPrepared = false;
+                        lastRotation = -1;
+                    }
+                }
+            }
             prepareExternalDisplayRotation();
             return START_STICKY;
         }
@@ -141,7 +162,7 @@ public final class RotationController {
 
         private boolean coverDisplayIsOn() {
             if (displayManager == null) return true;
-            Display cover = displayManager.getDisplay(1);
+            Display cover = displayManager.getDisplay(coverDisplayId);
             return cover != null && cover.getState() != Display.STATE_OFF;
         }
 
@@ -149,11 +170,22 @@ public final class RotationController {
             if (!hasShizukuPermission() || externalRotationPrepared) return;
 
             externalRotationPrepared = true;
+            final int displayId = coverDisplayId;
             shellExecutor.execute(() -> {
-                boolean ok = runShell(
-                        "wm fixed-to-user-rotation -d 1 enabled"
+                boolean fixed = runShell(
+                        "wm fixed-to-user-rotation -d " + displayId + " enabled"
+                                + " || wm set-fix-to-user-rotation -d " + displayId + " enabled"
                 );
-                if (!ok) externalRotationPrepared = false;
+
+                // This is the important part for third-party apps: their own requested
+                // portrait/landscape orientation must not be allowed to override the cover display.
+                boolean ignoreRequests = runShell(
+                        "wm set-ignore-orientation-request -d " + displayId + " true"
+                );
+
+                if (!fixed || !ignoreRequests) {
+                    externalRotationPrepared = false;
+                }
             });
         }
 
@@ -177,7 +209,7 @@ public final class RotationController {
             }
 
             long now = System.currentTimeMillis();
-            if (rotation == lastRotation || now - lastChangeAt < 350) return;
+            if (rotation == lastRotation || now - lastChangeAt < 260) return;
 
             lastChangeAt = now;
             lastRotation = rotation;
@@ -185,8 +217,10 @@ public final class RotationController {
             if (hasShizukuPermission()) {
                 prepareExternalDisplayRotation();
                 final int targetRotation = rotation;
+                final int displayId = coverDisplayId;
                 shellExecutor.execute(() -> runShell(
-                        "wm user-rotation -d 1 lock " + targetRotation
+                        "wm user-rotation -d " + displayId + " lock " + targetRotation
+                                + " || wm set-user-rotation lock -d " + displayId + " " + targetRotation
                 ));
                 return;
             }
@@ -256,9 +290,17 @@ public final class RotationController {
             }
 
             if (hasShizukuPermission()) {
+                final int displayId = coverDisplayId;
                 shellExecutor.execute(() -> {
-                    runShell("wm user-rotation -d 1 free");
-                    runShell("wm fixed-to-user-rotation -d 1 disabled");
+                    runShell(
+                            "wm user-rotation -d " + displayId + " free"
+                                    + " || wm set-user-rotation free -d " + displayId
+                    );
+                    runShell("wm set-ignore-orientation-request -d " + displayId + " false");
+                    runShell(
+                            "wm fixed-to-user-rotation -d " + displayId + " default"
+                                    + " || wm set-fix-to-user-rotation -d " + displayId + " disabled"
+                    );
                 });
             }
 
