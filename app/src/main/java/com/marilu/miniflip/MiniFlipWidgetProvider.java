@@ -20,9 +20,9 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
                     R.layout.widget_miniflip_cover
             );
 
-            Intent intent = new Intent(context, MainActivity.class);
-            intent.putExtra(MainActivity.EXTRA_PAGE, 0);
-            intent.putExtra(MainActivity.EXTRA_OPEN_SETTINGS, false);
+            Intent intent = new Intent(context, WidgetLaunchActivity.class);
+            intent.setAction("com.marilu.miniflip.OPEN_IRVING_HOME");
+            intent.putExtra("openIrvingHome", true);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                     | Intent.FLAG_ACTIVITY_CLEAR_TOP
                     | Intent.FLAG_ACTIVITY_SINGLE_TOP);
