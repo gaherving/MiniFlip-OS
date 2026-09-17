@@ -683,7 +683,8 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_WALLPAPER);
     }
 
-    private void clearWallpaper() {
+    @Override
+    public void clearWallpaper() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
         if (wallpaperView != null) {
             wallpaperView.setImageDrawable(null);
