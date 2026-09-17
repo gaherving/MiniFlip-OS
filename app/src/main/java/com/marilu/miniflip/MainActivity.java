@@ -449,7 +449,7 @@ public class MainActivity extends Activity {
                 .setItems(items, (dialog, which) -> {
                     if (which == 0) showFavoriteManager();
                     else if (which == 1) pickWallpaper();
-                    else if (which == 2) clearWallpaper();
+                    else if (which == 2) clearMiniFlipWallpaper();
                     else if (which == 3) enableSystemAutoRotate();
                     else if (which == 4) openSettings();
                 })
@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_WALLPAPER);
     }
 
-    private void clearWallpaper() {
+    private void clearMiniFlipWallpaper() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
         wallpaperView.setImageDrawable(null);
         wallpaperView.setBackgroundColor(Color.BLACK);
