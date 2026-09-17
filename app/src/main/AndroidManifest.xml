@@ -15,6 +15,8 @@
     <application
         android:allowBackup="false"
         android:label="Irving OS"
+        android:icon="@drawable/irving_app_icon"
+        android:roundIcon="@drawable/irving_app_icon"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
