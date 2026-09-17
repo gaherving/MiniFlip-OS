@@ -2,24 +2,24 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_app_item_root"
     android:layout_width="match_parent"
-    android:layout_height="86dp"
+    android:layout_height="80dp"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="3dp">
+    android:padding="2dp">
 
     <ImageView
         android:id="@+id/widget_app_icon"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:scaleType="fitCenter" />
 
     <TextView
         android:id="@+id/widget_app_label"
         android:layout_width="match_parent"
-        android:layout_height="32dp"
+        android:layout_height="28dp"
         android:gravity="center"
         android:maxLines="2"
         android:ellipsize="end"
         android:textColor="#FFFFFF"
-        android:textSize="9sp" />
+        android:textSize="8.5sp" />
 </LinearLayout>
