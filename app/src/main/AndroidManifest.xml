@@ -40,5 +40,18 @@
                 android:value="Keeps external cover-screen apps responsive to physical device rotation while Irving OS is active." />
         </service>
 
+        <receiver
+            android:name=".MiniFlipWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/miniflip_widget_info" />
+            <meta-data
+                android:name="com.samsung.android.appwidget.provider"
+                android:resource="@xml/samsung_miniflip_widget_info" />
+        </receiver>
     </application>
 </manifest>
