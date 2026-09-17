@@ -39,5 +39,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.14-cover-widget-fix
+          name: Irving-OS-v0.15-visual-assets
           path: app/build/outputs/apk/debug/app-debug.apk
