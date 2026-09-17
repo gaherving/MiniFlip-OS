@@ -36,6 +36,9 @@ jobs:
       - name: Apply Irving OS v0.17 cover app launch patch
         run: python3 scripts/apply_v017.py
 
+      - name: Apply Irving OS v0.18 phone/background finishing patch
+        run: python3 scripts/apply_v018.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
