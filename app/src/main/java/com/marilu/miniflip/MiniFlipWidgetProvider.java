@@ -20,69 +20,28 @@ public class MiniFlipWidgetProvider extends AppWidgetProvider {
                     R.layout.widget_miniflip_cover
             );
 
-            Intent homeService = new Intent(context, MiniFlipWidgetService.class);
-            homeService.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
-            homeService.putExtra(MiniFlipWidgetService.EXTRA_MODE, MiniFlipWidgetService.MODE_HOME);
-            homeService.setData(android.net.Uri.parse(homeService.toUri(Intent.URI_INTENT_SCHEME)));
-            views.setRemoteAdapter(R.id.widget_home_grid, homeService);
+            Intent intent = new Intent(context, MainActivity.class);
+            intent.putExtra(MainActivity.EXTRA_PAGE, 0);
+            intent.putExtra(MainActivity.EXTRA_OPEN_SETTINGS, false);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
-            Intent dockService = new Intent(context, MiniFlipWidgetService.class);
-            dockService.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
-            dockService.putExtra(MiniFlipWidgetService.EXTRA_MODE, MiniFlipWidgetService.MODE_DOCK);
-            dockService.setData(android.net.Uri.parse(dockService.toUri(Intent.URI_INTENT_SCHEME)));
-            views.setRemoteAdapter(R.id.widget_dock_grid, dockService);
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(COVER_DISPLAY_ID)
+                    .toBundle();
 
-            PendingIntent homeTemplate = appLaunchTemplate(context, appWidgetId * 100 + 10);
-            PendingIntent dockTemplate = appLaunchTemplate(context, appWidgetId * 100 + 20);
-            views.setPendingIntentTemplate(R.id.widget_home_grid, homeTemplate);
-            views.setPendingIntentTemplate(R.id.widget_dock_grid, dockTemplate);
+            PendingIntent openHome = PendingIntent.getActivity(
+                    context,
+                    appWidgetId * 100 + 1,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE,
+                    options
+            );
 
-            PendingIntent openHome = mainPendingIntent(context, appWidgetId * 100 + 1, false);
-            PendingIntent openSettings = mainPendingIntent(context, appWidgetId * 100 + 2, true);
             views.setOnClickPendingIntent(R.id.widget_root, openHome);
-            views.setOnClickPendingIntent(R.id.widget_settings, openSettings);
-
+            views.setOnClickPendingIntent(R.id.widget_open, openHome);
             appWidgetManager.updateAppWidget(appWidgetId, views);
-            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_home_grid);
-            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_dock_grid);
         }
-    }
-
-    private PendingIntent appLaunchTemplate(Context context, int requestCode) {
-        Intent intent = new Intent(context, WidgetLaunchActivity.class);
-        intent.setAction("com.marilu.miniflip.OPEN_WIDGET_APP");
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        Bundle options = ActivityOptions.makeBasic()
-                .setLaunchDisplayId(COVER_DISPLAY_ID)
-                .toBundle();
-        return PendingIntent.getActivity(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE,
-                options
-        );
-    }
-
-    private PendingIntent mainPendingIntent(Context context, int requestCode, boolean openSettings) {
-        Intent intent = new Intent(context, MainActivity.class);
-        intent.putExtra(MainActivity.EXTRA_PAGE, 0);
-        intent.putExtra(MainActivity.EXTRA_OPEN_SETTINGS, openSettings);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-
-        Bundle options = ActivityOptions.makeBasic()
-                .setLaunchDisplayId(COVER_DISPLAY_ID)
-                .toBundle();
-        return PendingIntent.getActivity(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE,
-                options
-        );
     }
 }
