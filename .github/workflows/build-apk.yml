@@ -72,6 +72,9 @@ jobs:
       - name: Apply Irving OS v0.26 easy wireless pairing
         run: python3 scripts/apply_v026_easy_pairing.py
 
+      - name: Apply Irving OS v0.27 notification pairing
+        run: python3 scripts/apply_v027_notification_pairing.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
@@ -81,5 +84,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.26-easy-pairing
+          name: Irving-OS-v0.27-notification-pairing
           path: app/build/outputs/apk/debug/app-debug.apk
