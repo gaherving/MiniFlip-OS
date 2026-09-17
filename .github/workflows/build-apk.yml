@@ -30,6 +30,9 @@ jobs:
           path: ~/.android/debug.keystore
           key: miniflip-debug-keystore-v1
 
+      - name: Apply Irving OS v0.16 interaction patch
+        run: python3 scripts/apply_v016.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
@@ -39,5 +42,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.15-visual-assets
+          name: Irving-OS-v0.16-fluid-dock-swipe-back
           path: app/build/outputs/apk/debug/app-debug.apk
