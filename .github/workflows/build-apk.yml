@@ -45,14 +45,14 @@ jobs:
       - name: Apply Irving OS v0.20 UserService rotation patch
         run: python3 scripts/apply_v020.py
 
-      - name: Restore Irving OS landscape background
-        run: python3 scripts/restore_v020_background.py
-
       - name: Finalize Irving OS v0.20 build version
         run: python3 scripts/finalize_v020.py
 
       - name: Apply Irving OS v0.21 overlay autorotation patch
         run: python3 scripts/apply_v021_overlay_rotation.py
+
+      - name: Apply Irving OS v0.22 cover rotation display fix
+        run: python3 scripts/apply_v022_rotation_display_fix.py
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -63,5 +63,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.21-overlay-autorotate
+          name: Irving-OS-v0.22-cover-rotation-display-fix
           path: app/build/outputs/apk/debug/app-debug.apk
