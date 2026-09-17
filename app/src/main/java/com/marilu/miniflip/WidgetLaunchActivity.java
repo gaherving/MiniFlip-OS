@@ -31,6 +31,8 @@ public class WidgetLaunchActivity extends Activity {
             return;
         }
 
+        RotationController.enableSystemAutoRotate(this);
+
         try {
             Intent target;
             if (activityName != null && !activityName.isEmpty()) {
