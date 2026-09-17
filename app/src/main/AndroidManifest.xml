@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <intent>
@@ -11,7 +14,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="MiniFlip OS"
+        android:label="Irving OS"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
@@ -31,6 +34,15 @@
             android:noHistory="true"
             android:screenOrientation="fullSensor"
             android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <service
+            android:name=".RotationController$EnforcerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps external cover-screen apps responsive to physical device rotation while Irving OS is active." />
+        </service>
 
         <service
             android:name=".MiniFlipWidgetService"
