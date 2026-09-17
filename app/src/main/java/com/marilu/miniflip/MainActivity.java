@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
         applyImmersiveMode();
         getWindow().setStatusBarColor(Color.BLACK);
         getWindow().setNavigationBarColor(Color.BLACK);
+        RotationController.enableSystemAutoRotate(this);
 
         loadLauncherApps();
         buildUi();
@@ -97,6 +98,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         applyImmersiveMode();
+        RotationController.enableSystemAutoRotate(this);
         if (currentPage == PAGE_RECENTS && recentsGrid != null) renderRecents();
     }
 
@@ -125,15 +127,23 @@ public class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText("MiniFlip OS");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(18);
+        title.setTextSize(17);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(40), 1f));
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(36), 1f));
+
+        TextView rotateButton = makeRoundTextButton("↻");
+        rotateButton.setTextSize(16);
+        rotateButton.setOnClickListener(v -> configureRotation());
+        LinearLayout.LayoutParams rotateParams = new LinearLayout.LayoutParams(dp(34), dp(34));
+        rotateParams.setMargins(0, 0, dp(5), 0);
+        header.addView(rotateButton, rotateParams);
 
         TextView settingsButton = makeRoundTextButton("⚙");
+        settingsButton.setTextSize(16);
         settingsButton.setOnClickListener(v -> openSettings());
-        header.addView(settingsButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(44)));
+        header.addView(settingsButton, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(40)));
 
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -148,7 +158,7 @@ public class MainActivity extends Activity {
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
         nav.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        nav.setPadding(dp(2), dp(3), 0, dp(3));
+        nav.setPadding(dp(2), dp(2), 0, dp(2));
 
         navHome = makeNavButton("Inicio");
         navApps = makeNavButton("Apps");
@@ -157,20 +167,34 @@ public class MainActivity extends Activity {
         navApps.setOnClickListener(v -> showPage(PAGE_APPS));
         navRecents.setOnClickListener(v -> showPage(PAGE_RECENTS));
 
-        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(72), dp(38));
-        p1.setMargins(0, 0, dp(5), 0);
-        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(66), dp(38));
-        p2.setMargins(0, 0, dp(5), 0);
-        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(70), dp(38));
-        p3.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(56), dp(32));
+        p1.setMargins(0, 0, dp(4), 0);
+        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(50), dp(32));
+        p2.setMargins(0, 0, dp(4), 0);
+        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(54), dp(32));
+        p3.setMargins(0, 0, dp(4), 0);
 
         nav.addView(navHome, p1);
         nav.addView(navApps, p2);
         nav.addView(navRecents, p3);
-        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(38), 1f));
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(44)));
+        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(32), 1f));
+        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(38)));
 
         setContentView(root);
+    }
+
+    private void configureRotation() {
+        if (RotationController.canWrite(this)) {
+            RotationController.enableSystemAutoRotate(this);
+            Toast.makeText(this, "Giro automático activado", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' para MiniFlip OS", Toast.LENGTH_LONG).show();
+            startActivity(RotationController.permissionIntent(this));
+        } catch (Exception e) {
+            Toast.makeText(this, "No se pudo abrir el permiso de giro", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private LinearLayout buildHomePage() {
@@ -183,7 +207,7 @@ public class MainActivity extends Activity {
         label.setTextColor(Color.LTGRAY);
         label.setTextSize(12);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(30)));
+        page.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
 
         GridLayout favorites = new GridLayout(this);
         favorites.setColumnCount(4);
@@ -194,27 +218,27 @@ public class MainActivity extends Activity {
         addFavorite(favorites, "com.android.chrome", "Chrome");
         addFavorite(favorites, "com.google.android.youtube", "YouTube");
         favorites.addView(makeSettingsTile());
-        page.addView(favorites, new LinearLayout.LayoutParams(-1, dp(108)));
+        page.addView(favorites, new LinearLayout.LayoutParams(-1, dp(102)));
 
         TextView allApps = makeWideButton("Todas las aplicaciones");
         allApps.setOnClickListener(v -> showPage(PAGE_APPS));
-        LinearLayout.LayoutParams allAppsParams = new LinearLayout.LayoutParams(-1, dp(46));
-        allAppsParams.setMargins(0, dp(8), 0, 0);
+        LinearLayout.LayoutParams allAppsParams = new LinearLayout.LayoutParams(-1, dp(42));
+        allAppsParams.setMargins(0, dp(6), 0, 0);
         page.addView(allApps, allAppsParams);
 
         TextView recent = makeWideButton("Abrir recientes");
         recent.setOnClickListener(v -> showPage(PAGE_RECENTS));
-        LinearLayout.LayoutParams recentParams = new LinearLayout.LayoutParams(-1, dp(46));
-        recentParams.setMargins(0, dp(8), 0, 0);
+        LinearLayout.LayoutParams recentParams = new LinearLayout.LayoutParams(-1, dp(42));
+        recentParams.setMargins(0, dp(6), 0, 0);
         page.addView(recent, recentParams);
 
         TextView tip = new TextView(this);
         tip.setText("MiniFlip OS Home · diseñado para la pantalla exterior del Flip5");
         tip.setTextColor(Color.GRAY);
-        tip.setTextSize(10);
+        tip.setTextSize(9);
         tip.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams tipParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        tipParams.setMargins(dp(6), dp(8), dp(6), 0);
+        tipParams.setMargins(dp(6), dp(6), dp(6), 0);
         page.addView(tip, tipParams);
         return page;
     }
@@ -231,7 +255,7 @@ public class MainActivity extends Activity {
         search.setTextSize(13);
         search.setPadding(dp(12), 0, dp(12), 0);
         search.setBackgroundColor(Color.rgb(28, 28, 34));
-        page.addView(search, new LinearLayout.LayoutParams(-1, dp(42)));
+        page.addView(search, new LinearLayout.LayoutParams(-1, dp(40)));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -262,7 +286,7 @@ public class MainActivity extends Activity {
         label.setTextColor(Color.LTGRAY);
         label.setTextSize(12);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(30)));
+        page.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -303,9 +327,9 @@ public class MainActivity extends Activity {
         TextView v = new TextView(this);
         v.setText(text);
         v.setTextColor(Color.LTGRAY);
-        v.setTextSize(11);
+        v.setTextSize(10);
         v.setGravity(Gravity.CENTER);
-        v.setPadding(dp(3), 0, dp(3), 0);
+        v.setPadding(dp(2), 0, dp(2), 0);
         return v;
     }
 
@@ -323,7 +347,7 @@ public class MainActivity extends Activity {
         TextView v = new TextView(this);
         v.setText(text);
         v.setTextColor(Color.WHITE);
-        v.setTextSize(13);
+        v.setTextSize(12);
         v.setTypeface(Typeface.DEFAULT_BOLD);
         v.setGravity(Gravity.CENTER);
         v.setBackgroundColor(Color.rgb(31, 31, 38));
@@ -392,7 +416,7 @@ public class MainActivity extends Activity {
             empty.setGravity(Gravity.CENTER);
             GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
             gp.width = -1;
-            gp.height = dp(120);
+            gp.height = dp(110);
             gp.columnSpec = GridLayout.spec(0, 4);
             empty.setLayoutParams(gp);
             recentsGrid.addView(empty);
@@ -420,7 +444,7 @@ public class MainActivity extends Activity {
         ImageView icon = new ImageView(this);
         icon.setImageDrawable(app.icon);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         TextView label = new TextView(this);
         label.setText(app.label);
@@ -428,7 +452,7 @@ public class MainActivity extends Activity {
         label.setTextSize(9);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(2);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(30)));
+        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
         box.setOnClickListener(v -> openApp(app));
         return box;
     }
@@ -438,16 +462,16 @@ public class MainActivity extends Activity {
         TextView icon = new TextView(this);
         icon.setText("⚙");
         icon.setTextColor(Color.WHITE);
-        icon.setTextSize(31);
+        icon.setTextSize(29);
         icon.setGravity(Gravity.CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         TextView label = new TextView(this);
         label.setText("Ajustes");
         label.setTextColor(Color.WHITE);
         label.setTextSize(9);
         label.setGravity(Gravity.CENTER);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(30)));
+        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
         box.setOnClickListener(v -> openSettings());
         return box;
     }
@@ -457,16 +481,16 @@ public class MainActivity extends Activity {
         TextView icon = new TextView(this);
         icon.setText("•");
         icon.setTextColor(Color.GRAY);
-        icon.setTextSize(32);
+        icon.setTextSize(30);
         icon.setGravity(Gravity.CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         TextView label = new TextView(this);
         label.setText(labelText);
         label.setTextColor(Color.GRAY);
         label.setTextSize(9);
         label.setGravity(Gravity.CENTER);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(30)));
+        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
         box.setOnClickListener(v -> Toast.makeText(this, labelText + " no está instalada", Toast.LENGTH_SHORT).show());
         return box;
     }
@@ -475,10 +499,10 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
-        box.setPadding(dp(2), dp(7), dp(2), dp(4));
+        box.setPadding(dp(2), dp(5), dp(2), dp(3));
         GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
         gp.width = 0;
-        gp.height = dp(100);
+        gp.height = dp(94);
         gp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         gp.setMargins(dp(2), dp(2), dp(2), dp(2));
         box.setLayoutParams(gp);
@@ -487,6 +511,7 @@ public class MainActivity extends Activity {
 
     private void openApp(AppEntry app) {
         saveRecent(app.packageName);
+        RotationController.enableSystemAutoRotate(this);
         try {
             Intent i = new Intent(Intent.ACTION_MAIN);
             i.addCategory(Intent.CATEGORY_LAUNCHER);
