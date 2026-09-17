@@ -10,8 +10,8 @@ android {
         applicationId 'com.marilu.miniflip'
         minSdk 30
         targetSdk 35
-        versionCode 11
-        versionName '0.11-irving-os-defaults'
+        versionCode 12
+        versionName '0.12-irving-os-direct-home'
     }
 }
 
