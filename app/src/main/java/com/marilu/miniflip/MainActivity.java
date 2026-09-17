@@ -1,6 +1,7 @@
 package com.marilu.miniflip;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -8,6 +9,7 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
@@ -40,17 +42,24 @@ public class MainActivity extends Activity {
     private static final int PAGE_HOME = 0;
     private static final int PAGE_APPS = 1;
     private static final int PAGE_RECENTS = 2;
+    private static final int REQUEST_WALLPAPER = 7001;
+    private static final int FAVORITE_SLOTS = 8;
+
     private static final String PREFS = "miniflip_prefs";
     private static final String RECENTS = "recents";
+    private static final String WALLPAPER_URI = "wallpaper_uri";
+    private static final String FAVORITE_PREFIX = "favorite_";
 
     private final List<AppEntry> allApps = new ArrayList<>();
     private FrameLayout content;
     private LinearLayout homePage;
     private LinearLayout appsPage;
     private LinearLayout recentsPage;
+    private GridLayout favoritesGrid;
     private GridLayout appsGrid;
     private GridLayout recentsGrid;
     private EditText search;
+    private ImageView wallpaperView;
     private TextView navHome;
     private TextView navApps;
     private TextView navRecents;
@@ -67,8 +76,6 @@ public class MainActivity extends Activity {
         applyImmersiveMode();
         getWindow().setStatusBarColor(Color.BLACK);
         getWindow().setNavigationBarColor(Color.BLACK);
-        RotationController.enableSystemAutoRotate(this);
-
         loadLauncherApps();
         buildUi();
         showPage(resolveRequestedPage(getIntent()));
@@ -79,6 +86,20 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         showPage(resolveRequestedPage(intent));
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WALLPAPER && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                getContentResolver().takePersistableUriPermission(uri, flags & Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(WALLPAPER_URI, uri.toString()).apply();
+            applySavedWallpaper();
+        }
     }
 
     private int resolveRequestedPage(Intent intent) {
@@ -98,7 +119,6 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         applyImmersiveMode();
-        RotationController.enableSystemAutoRotate(this);
         if (currentPage == PAGE_RECENTS && recentsGrid != null) renderRecents();
     }
 
@@ -114,10 +134,21 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        FrameLayout shell = new FrameLayout(this);
+        shell.setBackgroundColor(Color.BLACK);
+
+        wallpaperView = new ImageView(this);
+        wallpaperView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        wallpaperView.setBackgroundColor(Color.BLACK);
+        shell.addView(wallpaperView, new FrameLayout.LayoutParams(-1, -1));
+
+        View scrim = new View(this);
+        scrim.setBackgroundColor(Color.argb(105, 0, 0, 0));
+        shell.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(7, 7, 9));
-        root.setPadding(dp(8), dp(6), dp(8), dp(6));
+        root.setPadding(dp(8), dp(6), dp(8), dp(5));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -127,23 +158,21 @@ public class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText("MiniFlip OS");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(17);
+        title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(36), 1f));
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(38), 1f));
 
-        TextView rotateButton = makeRoundTextButton("↻");
-        rotateButton.setTextSize(16);
-        rotateButton.setOnClickListener(v -> configureRotation());
-        LinearLayout.LayoutParams rotateParams = new LinearLayout.LayoutParams(dp(34), dp(34));
-        rotateParams.setMargins(0, 0, dp(5), 0);
-        header.addView(rotateButton, rotateParams);
+        TextView editButton = makeHeaderButton("Editar", 11);
+        editButton.setOnClickListener(v -> showFavoriteManager());
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(58), dp(34));
+        editParams.setMargins(0, 0, dp(5), 0);
+        header.addView(editButton, editParams);
 
-        TextView settingsButton = makeRoundTextButton("⚙");
-        settingsButton.setTextSize(16);
-        settingsButton.setOnClickListener(v -> openSettings());
-        header.addView(settingsButton, new LinearLayout.LayoutParams(dp(34), dp(34)));
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(40)));
+        TextView settingsButton = makeHeaderButton("⚙", 18);
+        settingsButton.setOnClickListener(v -> showMiniFlipSettings());
+        header.addView(settingsButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(42)));
 
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -167,79 +196,49 @@ public class MainActivity extends Activity {
         navApps.setOnClickListener(v -> showPage(PAGE_APPS));
         navRecents.setOnClickListener(v -> showPage(PAGE_RECENTS));
 
-        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(56), dp(32));
+        LinearLayout.LayoutParams p1 = new LinearLayout.LayoutParams(dp(54), dp(31));
         p1.setMargins(0, 0, dp(4), 0);
-        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(50), dp(32));
+        LinearLayout.LayoutParams p2 = new LinearLayout.LayoutParams(dp(50), dp(31));
         p2.setMargins(0, 0, dp(4), 0);
-        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(54), dp(32));
+        LinearLayout.LayoutParams p3 = new LinearLayout.LayoutParams(dp(54), dp(31));
         p3.setMargins(0, 0, dp(4), 0);
 
         nav.addView(navHome, p1);
         nav.addView(navApps, p2);
         nav.addView(navRecents, p3);
-        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(32), 1f));
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(38)));
+        nav.addView(new Space(this), new LinearLayout.LayoutParams(0, dp(31), 1f));
+        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(36)));
 
-        setContentView(root);
-    }
-
-    private void configureRotation() {
-        if (RotationController.canWrite(this)) {
-            RotationController.enableSystemAutoRotate(this);
-            Toast.makeText(this, "Giro automático activado", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        try {
-            Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' para MiniFlip OS", Toast.LENGTH_LONG).show();
-            startActivity(RotationController.permissionIntent(this));
-        } catch (Exception e) {
-            Toast.makeText(this, "No se pudo abrir el permiso de giro", Toast.LENGTH_SHORT).show();
-        }
+        shell.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(shell);
+        applySavedWallpaper();
     }
 
     private LinearLayout buildHomePage() {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(2), dp(4), dp(2), dp(2));
+        page.setPadding(dp(2), dp(2), dp(2), dp(1));
 
         TextView label = new TextView(this);
         label.setText("Favoritos");
-        label.setTextColor(Color.LTGRAY);
+        label.setTextColor(Color.WHITE);
         label.setTextSize(12);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
+        page.addView(label, new LinearLayout.LayoutParams(-1, dp(26)));
 
-        GridLayout favorites = new GridLayout(this);
-        favorites.setColumnCount(4);
-        favorites.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        favorites.setUseDefaultMargins(false);
-
-        addFavorite(favorites, "com.whatsapp", "WhatsApp");
-        addFavorite(favorites, "com.android.chrome", "Chrome");
-        addFavorite(favorites, "com.google.android.youtube", "YouTube");
-        favorites.addView(makeSettingsTile());
-        page.addView(favorites, new LinearLayout.LayoutParams(-1, dp(102)));
-
-        TextView allApps = makeWideButton("Todas las aplicaciones");
-        allApps.setOnClickListener(v -> showPage(PAGE_APPS));
-        LinearLayout.LayoutParams allAppsParams = new LinearLayout.LayoutParams(-1, dp(42));
-        allAppsParams.setMargins(0, dp(6), 0, 0);
-        page.addView(allApps, allAppsParams);
-
-        TextView recent = makeWideButton("Abrir recientes");
-        recent.setOnClickListener(v -> showPage(PAGE_RECENTS));
-        LinearLayout.LayoutParams recentParams = new LinearLayout.LayoutParams(-1, dp(42));
-        recentParams.setMargins(0, dp(6), 0, 0);
-        page.addView(recent, recentParams);
+        favoritesGrid = new GridLayout(this);
+        favoritesGrid.setColumnCount(4);
+        favoritesGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
+        favoritesGrid.setUseDefaultMargins(false);
+        page.addView(favoritesGrid, new LinearLayout.LayoutParams(-1, dp(176)));
+        renderFavorites();
 
         TextView tip = new TextView(this);
-        tip.setText("MiniFlip OS Home · diseñado para la pantalla exterior del Flip5");
-        tip.setTextColor(Color.GRAY);
+        tip.setText("Mantén pulsado un icono para cambiarlo");
+        tip.setTextColor(Color.LTGRAY);
         tip.setTextSize(9);
-        tip.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tipParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        tipParams.setMargins(dp(6), dp(6), dp(6), 0);
-        page.addView(tip, tipParams);
+        tip.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        page.addView(tip, new LinearLayout.LayoutParams(-1, 0, 1f));
         return page;
     }
 
@@ -250,11 +249,11 @@ public class MainActivity extends Activity {
         search = new EditText(this);
         search.setSingleLine(true);
         search.setHint("Buscar aplicación");
-        search.setHintTextColor(Color.GRAY);
+        search.setHintTextColor(Color.LTGRAY);
         search.setTextColor(Color.WHITE);
         search.setTextSize(13);
         search.setPadding(dp(12), 0, dp(12), 0);
-        search.setBackgroundColor(Color.rgb(28, 28, 34));
+        search.setBackgroundColor(Color.argb(205, 28, 28, 34));
         page.addView(search, new LinearLayout.LayoutParams(-1, dp(40)));
 
         ScrollView scroll = new ScrollView(this);
@@ -283,10 +282,10 @@ public class MainActivity extends Activity {
 
         TextView label = new TextView(this);
         label.setText("Abiertas desde MiniFlip");
-        label.setTextColor(Color.LTGRAY);
+        label.setTextColor(Color.WHITE);
         label.setTextSize(12);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
+        page.addView(label, new LinearLayout.LayoutParams(-1, dp(26)));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -305,6 +304,7 @@ public class MainActivity extends Activity {
         if (homePage != null) homePage.setVisibility(page == PAGE_HOME ? View.VISIBLE : View.GONE);
         if (appsPage != null) appsPage.setVisibility(page == PAGE_APPS ? View.VISIBLE : View.GONE);
         if (recentsPage != null) recentsPage.setVisibility(page == PAGE_RECENTS ? View.VISIBLE : View.GONE);
+        if (page == PAGE_HOME) renderFavorites();
         if (page == PAGE_RECENTS) renderRecents();
         updateNav();
         applyImmersiveMode();
@@ -318,40 +318,189 @@ public class MainActivity extends Activity {
     }
 
     private void styleNav(TextView v, boolean selected) {
-        v.setTextColor(selected ? Color.WHITE : Color.LTGRAY);
+        v.setTextColor(Color.WHITE);
         v.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-        v.setBackgroundColor(selected ? Color.rgb(39, 39, 48) : Color.rgb(20, 20, 25));
+        v.setBackgroundColor(selected ? Color.argb(235, 45, 45, 56) : Color.argb(205, 22, 22, 28));
     }
 
     private TextView makeNavButton(String text) {
         TextView v = new TextView(this);
         v.setText(text);
-        v.setTextColor(Color.LTGRAY);
+        v.setTextColor(Color.WHITE);
         v.setTextSize(10);
         v.setGravity(Gravity.CENTER);
         v.setPadding(dp(2), 0, dp(2), 0);
         return v;
     }
 
-    private TextView makeRoundTextButton(String text) {
+    private TextView makeHeaderButton(String text, int textSize) {
         TextView v = new TextView(this);
         v.setText(text);
         v.setTextColor(Color.WHITE);
-        v.setTextSize(18);
+        v.setTextSize(textSize);
         v.setGravity(Gravity.CENTER);
-        v.setBackgroundColor(Color.rgb(31, 31, 38));
+        v.setBackgroundColor(Color.argb(220, 31, 31, 38));
         return v;
     }
 
-    private TextView makeWideButton(String text) {
-        TextView v = new TextView(this);
-        v.setText(text);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(12);
-        v.setTypeface(Typeface.DEFAULT_BOLD);
-        v.setGravity(Gravity.CENTER);
-        v.setBackgroundColor(Color.rgb(31, 31, 38));
-        return v;
+    private void renderFavorites() {
+        if (favoritesGrid == null) return;
+        favoritesGrid.removeAllViews();
+        for (int i = 0; i < FAVORITE_SLOTS; i++) favoritesGrid.addView(makeFavoriteSlot(i));
+    }
+
+    private View makeFavoriteSlot(final int slot) {
+        AppEntry app = getFavoriteApp(slot);
+        LinearLayout box = baseTile(86);
+
+        if (app == null) {
+            TextView plus = new TextView(this);
+            plus.setText("+");
+            plus.setTextColor(Color.WHITE);
+            plus.setTextSize(28);
+            plus.setGravity(Gravity.CENTER);
+            plus.setBackgroundColor(Color.argb(125, 45, 45, 55));
+            box.addView(plus, new LinearLayout.LayoutParams(dp(40), dp(40)));
+            box.addView(tileLabel("Agregar"), new LinearLayout.LayoutParams(-1, dp(26)));
+            box.setOnClickListener(v -> chooseFavoriteForSlot(slot));
+            return box;
+        }
+
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(app.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(26)));
+        box.setOnClickListener(v -> openApp(app));
+        box.setOnLongClickListener(v -> { chooseFavoriteForSlot(slot); return true; });
+        return box;
+    }
+
+    private TextView tileLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(9);
+        label.setGravity(Gravity.CENTER);
+        label.setMaxLines(2);
+        return label;
+    }
+
+    private void showFavoriteManager() {
+        String[] rows = new String[FAVORITE_SLOTS];
+        for (int i = 0; i < FAVORITE_SLOTS; i++) {
+            AppEntry app = getFavoriteApp(i);
+            rows[i] = "Espacio " + (i + 1) + " · " + (app == null ? "Vacío" : app.label);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Editar favoritos")
+                .setItems(rows, (dialog, which) -> chooseFavoriteForSlot(which))
+                .setNegativeButton("Cerrar", null)
+                .show();
+    }
+
+    private void chooseFavoriteForSlot(final int slot) {
+        String[] items = new String[allApps.size() + 1];
+        items[0] = "Vaciar este espacio";
+        for (int i = 0; i < allApps.size(); i++) items[i + 1] = allApps.get(i).label;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Elegir aplicación")
+                .setItems(items, (dialog, which) -> {
+                    SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+                    if (which == 0) editor.putString(FAVORITE_PREFIX + slot, "");
+                    else {
+                        AppEntry app = allApps.get(which - 1);
+                        editor.putString(FAVORITE_PREFIX + slot, app.packageName + "\n" + app.activityName);
+                    }
+                    editor.apply();
+                    renderFavorites();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private AppEntry getFavoriteApp(int slot) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String key = FAVORITE_PREFIX + slot;
+        String raw;
+        if (prefs.contains(key)) {
+            raw = prefs.getString(key, "");
+            if (raw == null || raw.isEmpty()) return null;
+        } else {
+            if (slot == 0) return findByPackage("com.whatsapp");
+            if (slot == 1) return findByPackage("com.android.chrome");
+            if (slot == 2) return findByPackage("com.google.android.youtube");
+            return null;
+        }
+
+        String[] parts = raw.split("\n", 2);
+        if (parts.length == 2) {
+            AppEntry exact = findByComponent(parts[0], parts[1]);
+            if (exact != null) return exact;
+        }
+        return findByPackage(parts[0]);
+    }
+
+    private void showMiniFlipSettings() {
+        String[] items = {"Editar favoritos", "Cambiar imagen de fondo", "Quitar imagen de fondo", "Activar rotación automática", "Ajustes del teléfono"};
+        new AlertDialog.Builder(this)
+                .setTitle("MiniFlip OS")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) showFavoriteManager();
+                    else if (which == 1) pickWallpaper();
+                    else if (which == 2) clearWallpaper();
+                    else if (which == 3) enableSystemAutoRotate();
+                    else if (which == 4) openSettings();
+                })
+                .setNegativeButton("Cerrar", null)
+                .show();
+    }
+
+    private void pickWallpaper() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_WALLPAPER);
+    }
+
+    private void clearWallpaper() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+        wallpaperView.setImageDrawable(null);
+        wallpaperView.setBackgroundColor(Color.BLACK);
+    }
+
+    private void applySavedWallpaper() {
+        if (wallpaperView == null) return;
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, "");
+        if (saved == null || saved.isEmpty()) {
+            wallpaperView.setImageDrawable(null);
+            wallpaperView.setBackgroundColor(Color.BLACK);
+            return;
+        }
+        try {
+            wallpaperView.setImageURI(Uri.parse(saved));
+        } catch (Exception e) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+            wallpaperView.setImageDrawable(null);
+            wallpaperView.setBackgroundColor(Color.BLACK);
+        }
+    }
+
+    private void enableSystemAutoRotate() {
+        try {
+            if (!Settings.System.canWrite(this)) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+                Toast.makeText(this, "Activa 'Permitir modificar ajustes del sistema' y vuelve a MiniFlip", Toast.LENGTH_LONG).show();
+                return;
+            }
+            Settings.System.putInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 1);
+            Toast.makeText(this, "Rotación automática activada", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "No se pudo cambiar la rotación", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void loadLauncherApps() {
@@ -375,9 +524,7 @@ public class MainActivity extends Activity {
 
         final Collator collator = Collator.getInstance(new Locale("es", "MX"));
         Collections.sort(allApps, new Comparator<AppEntry>() {
-            @Override public int compare(AppEntry a, AppEntry b) {
-                return collator.compare(a.label, b.label);
-            }
+            @Override public int compare(AppEntry a, AppEntry b) { return collator.compare(a.label, b.label); }
         });
     }
 
@@ -411,107 +558,68 @@ public class MainActivity extends Activity {
         if (added == 0) {
             TextView empty = new TextView(this);
             empty.setText("Aquí aparecerán las aplicaciones que abras desde MiniFlip OS.");
-            empty.setTextColor(Color.GRAY);
-            empty.setTextSize(12);
+            empty.setTextColor(Color.LTGRAY);
+            empty.setTextSize(11);
             empty.setGravity(Gravity.CENTER);
             GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
             gp.width = -1;
-            gp.height = dp(110);
+            gp.height = dp(100);
             gp.columnSpec = GridLayout.spec(0, 4);
             empty.setLayoutParams(gp);
             recentsGrid.addView(empty);
         }
     }
 
-    private void addFavorite(GridLayout grid, String packageName, String fallbackLabel) {
-        AppEntry app = findByPackage(packageName);
-        if (app != null) {
-            grid.addView(makeTile(app));
-        } else {
-            grid.addView(makeMissingTile(fallbackLabel));
-        }
+    private AppEntry findByPackage(String packageName) {
+        for (AppEntry app : allApps) if (app.packageName.equals(packageName)) return app;
+        return null;
     }
 
-    private AppEntry findByPackage(String packageName) {
-        for (AppEntry app : allApps) {
-            if (app.packageName.equals(packageName)) return app;
-        }
+    private AppEntry findByComponent(String packageName, String activityName) {
+        for (AppEntry app : allApps) if (app.packageName.equals(packageName) && app.activityName.equals(activityName)) return app;
         return null;
     }
 
     private View makeTile(AppEntry app) {
-        LinearLayout box = baseTile();
+        LinearLayout box = baseTile(86);
         ImageView icon = new ImageView(this);
         icon.setImageDrawable(app.icon);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-
-        TextView label = new TextView(this);
-        label.setText(app.label);
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(9);
-        label.setGravity(Gravity.CENTER);
-        label.setMaxLines(2);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
+        box.addView(tileLabel(app.label), new LinearLayout.LayoutParams(-1, dp(26)));
         box.setOnClickListener(v -> openApp(app));
         return box;
     }
 
     private View makeSettingsTile() {
-        LinearLayout box = baseTile();
+        LinearLayout box = baseTile(86);
         TextView icon = new TextView(this);
         icon.setText("⚙");
         icon.setTextColor(Color.WHITE);
-        icon.setTextSize(29);
+        icon.setTextSize(28);
         icon.setGravity(Gravity.CENTER);
         box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-
-        TextView label = new TextView(this);
-        label.setText("Ajustes");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(9);
-        label.setGravity(Gravity.CENTER);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
+        box.addView(tileLabel("Ajustes"), new LinearLayout.LayoutParams(-1, dp(26)));
         box.setOnClickListener(v -> openSettings());
         return box;
     }
 
-    private View makeMissingTile(String labelText) {
-        LinearLayout box = baseTile();
-        TextView icon = new TextView(this);
-        icon.setText("•");
-        icon.setTextColor(Color.GRAY);
-        icon.setTextSize(30);
-        icon.setGravity(Gravity.CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-
-        TextView label = new TextView(this);
-        label.setText(labelText);
-        label.setTextColor(Color.GRAY);
-        label.setTextSize(9);
-        label.setGravity(Gravity.CENTER);
-        box.addView(label, new LinearLayout.LayoutParams(-1, dp(28)));
-        box.setOnClickListener(v -> Toast.makeText(this, labelText + " no está instalada", Toast.LENGTH_SHORT).show());
-        return box;
-    }
-
-    private LinearLayout baseTile() {
+    private LinearLayout baseTile(int heightDp) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(2), dp(5), dp(2), dp(3));
         GridLayout.LayoutParams gp = new GridLayout.LayoutParams();
         gp.width = 0;
-        gp.height = dp(94);
+        gp.height = dp(heightDp);
         gp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        gp.setMargins(dp(2), dp(2), dp(2), dp(2));
+        gp.setMargins(dp(1), dp(1), dp(1), dp(1));
         box.setLayoutParams(gp);
         return box;
     }
 
     private void openApp(AppEntry app) {
         saveRecent(app.packageName);
-        RotationController.enableSystemAutoRotate(this);
         try {
             Intent i = new Intent(Intent.ACTION_MAIN);
             i.addCategory(Intent.CATEGORY_LAUNCHER);
@@ -533,11 +641,8 @@ public class MainActivity extends Activity {
 
     private void openSettings() {
         saveRecent("__settings__");
-        try {
-            startActivity(new Intent(Settings.ACTION_SETTINGS));
-        } catch (Exception e) {
-            Toast.makeText(this, "No se pudieron abrir Ajustes", Toast.LENGTH_SHORT).show();
-        }
+        try { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
+        catch (Exception e) { Toast.makeText(this, "No se pudieron abrir Ajustes", Toast.LENGTH_SHORT).show(); }
     }
 
     private void saveRecent(String packageName) {
