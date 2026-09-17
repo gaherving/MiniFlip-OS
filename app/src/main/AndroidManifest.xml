@@ -13,6 +13,7 @@
     </queries>
 
     <application
+        android:name=".IrvingApplication"
         android:allowBackup="false"
         android:label="Irving OS"
         android:icon="@drawable/irving_app_icon"
