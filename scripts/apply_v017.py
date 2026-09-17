@@ -38,12 +38,6 @@ import java.util.concurrent.Executors;
 
 import rikka.shizuku.Shizuku;
 
-/**
- * Launches apps in the same display where Irving OS is actually running.
- * When Shizuku is available, the launch is performed as shell first. This
- * avoids a number of Samsung Flex Window caller restrictions that can produce
- * "Open phone to continue" when one cover-screen app launches another.
- */
 public final class CoverAppLauncher {
     private static final int FALLBACK_COVER_DISPLAY_ID = 1;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
@@ -59,18 +53,39 @@ public final class CoverAppLauncher {
         RotationController.startRotationEnforcer(activity);
         final int displayId = resolveDisplayId(activity);
 
+        // First use the exact launcher component on the external display. This is
+        // the same launch path used by the earlier working Irving OS versions and
+        // avoids Samsung Phone's "Open phone to continue" gate that ACTION_DIAL
+        // can trigger on the cover screen.
+        if (launchExplicit(activity, packageName, activityName, displayId)) return;
+
+        // Then try the package's normal launcher intent.
+        if (launchPackageIntent(activity, packageName, displayId)) return;
+
+        // Only use shell/Shizuku as a fallback. A successful shell command can
+        // still land on Samsung's restriction screen, so it must not be the first
+        // route for Phone or apps that already launch normally on Flex Window.
         if (RotationController.hasShizukuPermission()) {
             EXECUTOR.execute(() -> {
                 boolean started = launchWithShell(packageName, activityName, displayId);
                 if (!started) {
-                    activity.runOnUiThread(() ->
-                            launchNormally(activity, packageName, activityName, label, displayId));
+                    activity.runOnUiThread(() -> {
+                        if (!launchDialFallback(activity, packageName, displayId)) {
+                            Toast.makeText(activity,
+                                    "No se pudo abrir " + (label == null ? packageName : label),
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
                 }
             });
             return;
         }
 
-        launchNormally(activity, packageName, activityName, label, displayId);
+        if (!launchDialFallback(activity, packageName, displayId)) {
+            Toast.makeText(activity,
+                    "No se pudo abrir " + (label == null ? packageName : label),
+                    Toast.LENGTH_SHORT).show();
+        }
     }
 
     public static void launchSystemSettings(Activity activity) {
@@ -100,10 +115,71 @@ public final class CoverAppLauncher {
     }
 
     private static boolean isPhonePackage(String packageName) {
+        if (packageName == null) return false;
+        String p = packageName.toLowerCase();
         return "com.samsung.android.dialer".equals(packageName)
                 || "com.android.dialer".equals(packageName)
                 || "com.google.android.dialer".equals(packageName)
-                || packageName.toLowerCase().contains("dialer");
+                || p.contains("dialer")
+                || p.contains("telephony");
+    }
+
+    private static boolean launchExplicit(Activity activity,
+                                          String packageName,
+                                          String activityName,
+                                          int displayId) {
+        if (activityName == null || activityName.isEmpty()) return false;
+        try {
+            Intent target = new Intent(Intent.ACTION_MAIN);
+            target.addCategory(Intent.CATEGORY_LAUNCHER);
+            target.setClassName(packageName, activityName);
+            target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(displayId)
+                    .toBundle();
+            activity.startActivity(target, options);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean launchPackageIntent(Activity activity,
+                                               String packageName,
+                                               int displayId) {
+        try {
+            Intent target = activity.getPackageManager().getLaunchIntentForPackage(packageName);
+            if (target == null) return false;
+            target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(displayId)
+                    .toBundle();
+            activity.startActivity(target, options);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean launchDialFallback(Activity activity,
+                                              String packageName,
+                                              int displayId) {
+        if (!isPhonePackage(packageName)) return false;
+        try {
+            Intent dial = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:"));
+            dial.setPackage(packageName);
+            dial.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            Bundle options = ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(displayId)
+                    .toBundle();
+            activity.startActivity(dial, options);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static boolean launchWithShell(String packageName,
@@ -111,16 +187,7 @@ public final class CoverAppLauncher {
                                            int displayId) {
         if (!RotationController.hasShizukuPermission()) return false;
 
-        // The Samsung Phone launcher is one of the apps that can be rejected by
-        // the Flex Window when launched by another ordinary app. ACTION_DIAL as
-        // shell reaches the dialer task directly instead of the normal launcher
-        // gate, so use it first for dialer packages.
-        if (isPhonePackage(packageName)) {
-            String dial = "am start --display " + displayId
-                    + " -a android.intent.action.DIAL -p " + shellQuote(packageName);
-            if (runShell(dial)) return true;
-        }
-
+        // Match the normal explicit-component launch before trying DIAL.
         if (activityName != null && !activityName.isEmpty()) {
             String component = packageName + "/" + activityName;
             String main = "am start --display " + displayId
@@ -134,70 +201,15 @@ public final class CoverAppLauncher {
             if (runShell(direct)) return true;
         }
 
+        if (isPhonePackage(packageName)) {
+            String dial = "am start --display " + displayId
+                    + " -a android.intent.action.DIAL -p " + shellQuote(packageName);
+            if (runShell(dial)) return true;
+        }
+
         String monkey = "monkey --pct-syskeys 0 -p " + shellQuote(packageName)
                 + " -c android.intent.category.LAUNCHER 1";
         return runShell(monkey);
-    }
-
-    private static void launchNormally(Activity activity,
-                                       String packageName,
-                                       String activityName,
-                                       String label,
-                                       int displayId) {
-        // For Phone try ACTION_DIAL first; on some One UI builds this enters the
-        // dialer directly while opening its launcher activity triggers the fold
-        // restriction screen.
-        if (isPhonePackage(packageName)) {
-            try {
-                Intent dial = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:"));
-                dial.setPackage(packageName);
-                dial.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                Bundle options = ActivityOptions.makeBasic()
-                        .setLaunchDisplayId(displayId)
-                        .toBundle();
-                activity.startActivity(dial, options);
-                return;
-            } catch (Exception ignored) {}
-        }
-
-        try {
-            Intent target = new Intent(Intent.ACTION_MAIN);
-            target.addCategory(Intent.CATEGORY_LAUNCHER);
-            if (activityName != null && !activityName.isEmpty()) {
-                target.setClassName(packageName, activityName);
-            } else {
-                Intent packageIntent = activity.getPackageManager()
-                        .getLaunchIntentForPackage(packageName);
-                if (packageIntent == null) throw new IllegalStateException("No launch intent");
-                target = packageIntent;
-            }
-            target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-
-            Bundle options = ActivityOptions.makeBasic()
-                    .setLaunchDisplayId(displayId)
-                    .toBundle();
-            activity.startActivity(target, options);
-            return;
-        } catch (Exception ignored) {}
-
-        try {
-            Intent fallback = activity.getPackageManager().getLaunchIntentForPackage(packageName);
-            if (fallback != null) {
-                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                Bundle options = ActivityOptions.makeBasic()
-                        .setLaunchDisplayId(displayId)
-                        .toBundle();
-                activity.startActivity(fallback, options);
-                return;
-            }
-        } catch (Exception ignored) {}
-
-        Toast.makeText(activity,
-                "No se pudo abrir " + (label == null ? packageName : label),
-                Toast.LENGTH_SHORT).show();
     }
 
     private static String shellQuote(String value) {
