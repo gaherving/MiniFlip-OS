@@ -57,6 +57,9 @@ jobs:
       - name: Restore verified Irving OS wallpaper
         run: python3 scripts/restore_v022_background.py
 
+      - name: Apply Irving OS v0.23 compact dialer and power menu
+        run: python3 scripts/apply_v023_dialer_power.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
@@ -66,5 +69,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.22-cover-rotation-wallpaper-fix
+          name: Irving-OS-v0.23-dialer-power
           path: app/build/outputs/apk/debug/app-debug.apk
