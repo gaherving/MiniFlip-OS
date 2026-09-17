@@ -23,6 +23,28 @@ public class WidgetLaunchActivity extends Activity {
     }
 
     private void launchTarget(Intent source) {
+        boolean openIrvingHome = source != null
+                && source.getBooleanExtra("openIrvingHome", false);
+
+        if (openIrvingHome) {
+            try {
+                Intent home = new Intent(this, MainActivity.class);
+                home.putExtra(MainActivity.EXTRA_PAGE, 0);
+                home.putExtra(MainActivity.EXTRA_OPEN_SETTINGS, false);
+                home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+                Bundle options = ActivityOptions.makeBasic()
+                        .setLaunchDisplayId(COVER_DISPLAY_ID)
+                        .toBundle();
+                startActivity(home, options);
+            } catch (Exception e) {
+                Toast.makeText(this, "No se pudo abrir Irving OS", Toast.LENGTH_SHORT).show();
+            }
+            finish();
+            return;
+        }
+
         String packageName = source == null ? null : source.getStringExtra("packageName");
         String activityName = source == null ? null : source.getStringExtra("activityName");
 
