@@ -45,7 +45,19 @@ public class MiniFlipWidgetService extends RemoteViewsService {
             AppEntry app = apps.get(position);
             RemoteViews row = new RemoteViews(context.getPackageName(), R.layout.widget_app_item);
             row.setTextViewText(R.id.widget_app_label, app.label);
-            row.setImageViewBitmap(R.id.widget_app_icon, drawableToBitmap(app.icon));
+
+            try {
+                Drawable icon = context.getPackageManager().getActivityIcon(
+                        new android.content.ComponentName(app.packageName, app.activityName)
+                );
+                row.setImageViewBitmap(R.id.widget_app_icon, drawableToBitmap(icon, 64));
+            } catch (Exception ignored) {
+                try {
+                    Drawable icon = context.getPackageManager().getApplicationIcon(app.packageName);
+                    row.setImageViewBitmap(R.id.widget_app_icon, drawableToBitmap(icon, 64));
+                } catch (Exception ignoredAgain) {
+                }
+            }
 
             Intent fillIn = new Intent();
             fillIn.putExtra("packageName", app.packageName);
@@ -61,57 +73,71 @@ public class MiniFlipWidgetService extends RemoteViewsService {
 
         private void loadApps() {
             apps.clear();
-            PackageManager pm = context.getPackageManager();
-            Intent intent = new Intent(Intent.ACTION_MAIN, null);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            List<ResolveInfo> results = pm.queryIntentActivities(intent, 0);
-            Set<String> seen = new LinkedHashSet<>();
+            try {
+                PackageManager pm = context.getPackageManager();
+                Intent intent = new Intent(Intent.ACTION_MAIN, null);
+                intent.addCategory(Intent.CATEGORY_LAUNCHER);
+                List<ResolveInfo> results = pm.queryIntentActivities(intent, 0);
+                Set<String> seen = new LinkedHashSet<>();
 
-            for (ResolveInfo r : results) {
-                if (r.activityInfo == null || r.activityInfo.packageName == null) continue;
-                if (context.getPackageName().equals(r.activityInfo.packageName)) continue;
-                String key = r.activityInfo.packageName + "/" + r.activityInfo.name;
-                if (!seen.add(key)) continue;
+                for (ResolveInfo r : results) {
+                    try {
+                        if (r.activityInfo == null || r.activityInfo.packageName == null) continue;
+                        if (context.getPackageName().equals(r.activityInfo.packageName)) continue;
+                        String key = r.activityInfo.packageName + "/" + r.activityInfo.name;
+                        if (!seen.add(key)) continue;
 
-                CharSequence labelCs = r.loadLabel(pm);
-                String label = labelCs == null ? r.activityInfo.packageName : labelCs.toString();
-                Drawable icon = r.loadIcon(pm);
-                apps.add(new AppEntry(label, r.activityInfo.packageName, r.activityInfo.name, icon));
-            }
-
-            final Collator collator = Collator.getInstance(new Locale("es", "MX"));
-            Collections.sort(apps, new Comparator<AppEntry>() {
-                @Override public int compare(AppEntry a, AppEntry b) {
-                    return collator.compare(a.label, b.label);
+                        CharSequence labelCs = r.loadLabel(pm);
+                        String label = labelCs == null ? r.activityInfo.packageName : labelCs.toString();
+                        apps.add(new AppEntry(label, r.activityInfo.packageName, r.activityInfo.name));
+                    } catch (Exception ignored) {
+                    }
                 }
-            });
+
+                final Collator collator = Collator.getInstance(new Locale("es", "MX"));
+                Collections.sort(apps, new Comparator<AppEntry>() {
+                    @Override public int compare(AppEntry a, AppEntry b) {
+                        return collator.compare(a.label, b.label);
+                    }
+                });
+            } catch (Exception ignored) {
+            }
         }
 
-        private Bitmap drawableToBitmap(Drawable drawable) {
-            if (drawable instanceof BitmapDrawable) {
-                Bitmap bitmap = ((BitmapDrawable) drawable).getBitmap();
-                if (bitmap != null) return bitmap;
+        private Bitmap drawableToBitmap(Drawable drawable, int maxPx) {
+            if (drawable == null) return null;
+            Bitmap source;
+            if (drawable instanceof BitmapDrawable && ((BitmapDrawable) drawable).getBitmap() != null) {
+                source = ((BitmapDrawable) drawable).getBitmap();
+            } else {
+                int width = Math.max(1, drawable.getIntrinsicWidth());
+                int height = Math.max(1, drawable.getIntrinsicHeight());
+                width = Math.min(width, 256);
+                height = Math.min(height, 256);
+                source = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(source);
+                drawable.setBounds(0, 0, width, height);
+                drawable.draw(canvas);
             }
-            int width = Math.max(1, drawable.getIntrinsicWidth());
-            int height = Math.max(1, drawable.getIntrinsicHeight());
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bitmap);
-            drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-            drawable.draw(canvas);
-            return bitmap;
+
+            int width = source.getWidth();
+            int height = source.getHeight();
+            if (width <= maxPx && height <= maxPx) return source;
+            float scale = Math.min((float) maxPx / width, (float) maxPx / height);
+            int newWidth = Math.max(1, Math.round(width * scale));
+            int newHeight = Math.max(1, Math.round(height * scale));
+            return Bitmap.createScaledBitmap(source, newWidth, newHeight, true);
         }
 
         private static class AppEntry {
             final String label;
             final String packageName;
             final String activityName;
-            final Drawable icon;
 
-            AppEntry(String label, String packageName, String activityName, Drawable icon) {
+            AppEntry(String label, String packageName, String activityName) {
                 this.label = label;
                 this.packageName = packageName;
                 this.activityName = activityName;
-                this.icon = icon;
             }
         }
     }
