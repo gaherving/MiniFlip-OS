@@ -60,6 +60,9 @@ jobs:
       - name: Apply Irving OS v0.23 compact dialer and power menu
         run: python3 scripts/apply_v023_dialer_power.py
 
+      - name: Apply Irving OS v0.24 dialer and Shizuku permission flow
+        run: python3 scripts/apply_v024_dialer_permission.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
@@ -69,5 +72,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.23-dialer-power
+          name: Irving-OS-v0.24-dialer-permission
           path: app/build/outputs/apk/debug/app-debug.apk
