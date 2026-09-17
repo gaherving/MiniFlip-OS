@@ -63,6 +63,9 @@ jobs:
       - name: Apply Irving OS v0.24 compact dialer and one-time Shizuku permission
         run: python3 scripts/apply_v024b_permission_fix.py
 
+      - name: Apply Irving OS v0.25 embedded local ADB and Home status bar
+        run: python3 scripts/apply_v025_local_adb_statusbar.py
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
@@ -72,5 +75,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Irving-OS-v0.24-dialer-permission
+          name: Irving-OS-v0.25-local-adb-statusbar
           path: app/build/outputs/apk/debug/app-debug.apk
