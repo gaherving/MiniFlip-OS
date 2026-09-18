@@ -1,8 +1,8 @@
-name: Anastasia Cognitive v6.1
+name: Anastasia Cognitive v6.2
 on:
   workflow_dispatch:
   push:
-    branches: [anastasia-cognitive-v61]
+    branches: [anastasia-cognitive-v62]
     paths:
       - 'anastasia-neural/**'
       - '.github/workflows/anastasia-neural-v54.yml'
@@ -36,6 +36,6 @@ jobs:
         run: gradle :app:assembleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: Anastasia-Cognitive-v6.1-unsigned
+          name: Anastasia-Cognitive-v6.2-unsigned
           path: anastasia-neural/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
