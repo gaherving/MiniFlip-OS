@@ -80,19 +80,19 @@ class CognitiveEngine(
                 ExperimentalFlags.enableSpeculativeDecoding = true
 
                 val selected = "GPU"
-                val config = EngineConfig(
+                val engineConfig = EngineConfig(
                     modelPath = modelPath,
                     backend = Backend.GPU(),
                     maxNumTokens = 4096,
                     cacheDir = context.cacheDir.absolutePath,
                 )
-                val initialized = Engine(config)
+                val initialized = Engine(engineConfig)
                 initialized.initialize()
 
                 engine = initialized
                 backendName = selected
 
-                val config = ConversationConfig(
+                val conversationConfig = ConversationConfig(
                     systemInstruction = Contents.of(systemInstruction),
                     samplerConfig = SamplerConfig(
                         topK = 32,
@@ -107,7 +107,7 @@ class CognitiveEngine(
                     ),
                 )
 
-                conversation = engine!!.createConversation(config)
+                conversation = engine!!.createConversation(conversationConfig)
                 ready = true
                 lastError = ""
                 listener.onState("ready", backendName, "Gemma 4 E2B GPU · LiteRT-LM")
