@@ -129,7 +129,6 @@ class CognitiveEngine(
                         enableThinking = false,
                         thinkingTokenBudget = 0,
                     ),
-                    enableSpeculativeDecoding = true,
                 )
 
                 conversation = engine!!.createConversation(config)
@@ -232,7 +231,6 @@ class CognitiveEngine(
                     prefillPrefaceOnInit = true,
                     maxOutputToken = 384,
                     thinkingConfig = ThinkingConfig(false, 0),
-                    enableSpeculativeDecoding = true,
                 )
                 conversation = engine!!.createConversation(config)
             } catch (t: Throwable) {
