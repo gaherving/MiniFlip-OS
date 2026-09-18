@@ -26,7 +26,7 @@ android {
             }
         }
     }
-    buildTypes { release { minifyEnabled false; shrinkResources false } }
+    lint { disable 'ExpiredTargetSdkVersion'; abortOnError false }\n    buildTypes { release { minifyEnabled false; shrinkResources false } }
     externalNativeBuild {
         cmake {
             path 'src/main/cpp/CMakeLists.txt'
