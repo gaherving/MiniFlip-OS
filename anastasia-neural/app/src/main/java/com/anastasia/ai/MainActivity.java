@@ -451,6 +451,19 @@ public class MainActivity extends Activity {
         }
 
 
+
+        @JavascriptInterface public void backupMemoryFabric(String json) {
+            try {
+                if (json == null) return;
+                prefs.edit().putString("memoryFabricBackup", json).apply();
+            } catch (Throwable ignored) {}
+        }
+
+        @JavascriptInterface public String restoreMemoryFabric() {
+            try { return prefs.getString("memoryFabricBackup", ""); }
+            catch (Throwable e) { return ""; }
+        }
+
         @JavascriptInterface public String cognitiveStatus() {
             if (fastModelComplete() &&
                     cognitiveEngine != null && !cognitiveEngine.getReady() &&
