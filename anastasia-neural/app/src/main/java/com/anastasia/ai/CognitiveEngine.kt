@@ -79,39 +79,15 @@ class CognitiveEngine(
                 Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
                 ExperimentalFlags.enableSpeculativeDecoding = true
 
-                var initialized: Engine? = null
-                var selected = "GPU"
-
-                try {
-                    val config = EngineConfig(
-                        modelPath = modelPath,
-                        backend = Backend.GPU(),
-                        maxNumTokens = 4096,
-                        cacheDir = context.cacheDir.absolutePath,
-                    )
-                    initialized = Engine(config)
-                    initialized.initialize()
-                } catch (gpuError: Throwable) {
-                    try {
-                        initialized?.close()
-                    } catch (_: Throwable) {
-                    }
-                    initialized = null
-                    selected = "CPU"
-                    listener.onState(
-                        "loading",
-                        selected,
-                        "GPU no disponible, usando CPU optimizada",
-                    )
-                    val cpuConfig = EngineConfig(
-                        modelPath = modelPath,
-                        backend = Backend.CPU(threadCount = 4),
-                        maxNumTokens = 4096,
-                        cacheDir = context.cacheDir.absolutePath,
-                    )
-                    initialized = Engine(cpuConfig)
-                    initialized.initialize()
-                }
+                val selected = "GPU"
+                val config = EngineConfig(
+                    modelPath = modelPath,
+                    backend = Backend.GPU(),
+                    maxNumTokens = 4096,
+                    cacheDir = context.cacheDir.absolutePath,
+                )
+                val initialized = Engine(config)
+                initialized.initialize()
 
                 engine = initialized
                 backendName = selected
