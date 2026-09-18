@@ -77,13 +77,13 @@ class CognitiveEngine(
             listener.onState("loading", backendName, "Inicializando Cognitive Engine")
             try {
                 Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
-                ExperimentalFlags.enableSpeculativeDecoding = true
+                ExperimentalFlags.enableSpeculativeDecoding = false
 
                 val selected = "GPU"
                 val engineConfig = EngineConfig(
                     modelPath = modelPath,
                     backend = Backend.GPU(),
-                    maxNumTokens = 4096,
+                    maxNumTokens = 2048,
                     cacheDir = context.cacheDir.absolutePath,
                 )
                 val initialized = Engine(engineConfig)
@@ -110,7 +110,7 @@ class CognitiveEngine(
                 conversation = engine!!.createConversation(conversationConfig)
                 ready = true
                 lastError = ""
-                listener.onState("ready", backendName, "Gemma 4 E2B GPU · LiteRT-LM")
+                listener.onState("ready", backendName, "Gemma 4 E2B GPU · LiteRT-LM · caché precargada")
             } catch (t: Throwable) {
                 ready = false
                 lastError = t.message ?: t.javaClass.simpleName
