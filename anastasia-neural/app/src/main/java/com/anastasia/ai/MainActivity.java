@@ -292,8 +292,8 @@ public class MainActivity extends Activity {
         if (!allowMetered && !isUnmetered()) return;
         try {
             DownloadManager.Request req = new DownloadManager.Request(Uri.parse(FAST_MODEL_URL));
-            req.setTitle("Anastasia 6 · Cognitive Engine");
-            req.setDescription("Gemma 4 E2B GPU · LiteRT-LM · cerebro rápido local");
+            req.setTitle("Anastasia 6.2 · Fast Brain GPU");
+            req.setDescription("Gemma 4 E2B GPU · 2.01 GB · verificación SHA-256");
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             if (!allowMetered) req.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
             req.setAllowedOverMetered(allowMetered);
