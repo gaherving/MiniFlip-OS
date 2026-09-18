@@ -134,7 +134,7 @@ class CognitiveEngine(
                 conversation = engine!!.createConversation(config)
                 ready = true
                 lastError = ""
-                listener.onState("ready", backendName, "Gemma 4 E2B · LiteRT-LM")
+                listener.onState("ready", backendName, "Gemma 4 E2B GPU · LiteRT-LM")
             } catch (t: Throwable) {
                 ready = false
                 lastError = t.message ?: t.javaClass.simpleName
