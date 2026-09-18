@@ -1,8 +1,8 @@
-name: Anastasia Neural v5.4
+name: Anastasia Fast Neural v5.5
 on:
   workflow_dispatch:
   push:
-    branches: [anastasia-neural-v54]
+    branches: [anastasia-fast-v55]
     paths:
       - 'anastasia-neural/**'
       - '.github/workflows/anastasia-neural-v54.yml'
@@ -36,6 +36,6 @@ jobs:
         run: gradle :app:assembleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: Anastasia-Neural-v5.4-unsigned
+          name: Anastasia-Fast-Neural-v5.5-unsigned
           path: anastasia-neural/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
