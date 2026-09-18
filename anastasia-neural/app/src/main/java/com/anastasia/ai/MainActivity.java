@@ -186,6 +186,11 @@ public class MainActivity extends Activity {
         js(code);
     }
 
+    private void deliverChunk(String id, String chunk) {
+        if (chunk == null || chunk.isEmpty()) return;
+        js("window.__nativeBrainChunk && window.__nativeBrainChunk(" + JSONObject.quote(id) + "," + JSONObject.quote(chunk) + ");");
+    }
+
     public final class Bridge {
         @JavascriptInterface public String brainStatus() {
             String result = brainStatusJson();
@@ -214,12 +219,29 @@ public class MainActivity extends Activity {
                     return;
                 }
                 try {
-                    String out = NativeBrain.generate(prompt, 520, 0.72f).trim();
-                    if (out.isEmpty()) throw new IllegalStateException("respuesta vacía");
-                    deliverBrain(requestId, out, null);
+                    int maxTokens = prompt.length() > 12000 ? 420 : 300;
+                    float temperature = 0.62f;
+                    int rc = NativeBrain.nativePrepare(prompt, maxTokens, temperature);
+                    if (rc != 0) throw new IllegalStateException("prepare=" + rc);
+                    StringBuilder out = new StringBuilder();
+                    while (true) {
+                        String piece = NativeBrain.nextPiece();
+                        if (piece == null) break;
+                        out.append(piece);
+                        deliverChunk(requestId, piece);
+                    }
+                    String answer = out.toString().trim();
+                    if (answer.isEmpty()) throw new IllegalStateException("respuesta vacía");
+                    deliverBrain(requestId, answer, null);
                 } catch (Throwable e) {
                     deliverBrain(requestId, null, "Error neuronal: " + e.getMessage());
                 }
+            });
+        }
+
+        @JavascriptInterface public void resetConversation() {
+            brainExecutor.execute(() -> {
+                try { NativeBrain.nativeResetConversation(); } catch (Throwable ignored) {}
             });
         }
 
