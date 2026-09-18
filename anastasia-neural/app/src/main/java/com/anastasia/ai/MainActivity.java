@@ -27,7 +27,7 @@ public class MainActivity extends Activity {
     // Fast / General Brain: Gemma 4 E2B through LiteRT-LM.
     private static final String FAST_MODEL_NAME = "gemma-4-E2B-it.litertlm";
     private static final String FAST_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true";
-    private static final long FAST_MODEL_READY_BYTES = 2_400_000_000L;
+    private static final long FAST_MODEL_READY_BYTES = 2_588_147_712L;
 
     private static final int VOICE_REQ = 9021;
 
