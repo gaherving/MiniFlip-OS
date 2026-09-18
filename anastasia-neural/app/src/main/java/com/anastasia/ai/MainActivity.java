@@ -16,6 +16,8 @@ import android.database.Cursor;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -25,9 +27,11 @@ public class MainActivity extends Activity {
     private static final long MODEL_READY_BYTES = 2_200_000_000L;
 
     // Fast / General Brain: Gemma 4 E2B through LiteRT-LM.
-    private static final String FAST_MODEL_NAME = "gemma-4-E2B-it.litertlm";
-    private static final String FAST_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true";
-    private static final long FAST_MODEL_READY_BYTES = 2_588_147_712L;
+    private static final String FAST_MODEL_NAME = "gemma-4-E2B-it-gpu.litertlm";
+    private static final String FAST_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm?download=true";
+    private static final long FAST_MODEL_READY_BYTES = 2_008_432_640L;
+    private static final String FAST_MODEL_SHA256 = "a53a59001894c58e6bdb5b9b227709f91a2e3e556baa7d85acf9c55402ba5cf5";
+    private static final String LEGACY_FAST_MODEL_NAME = "gemma-4-E2B-it.litertlm";
 
     private static final int VOICE_REQ = 9021;
 
@@ -50,6 +54,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("anastasia.native", MODE_PRIVATE);
+        migrateLegacyFastBrain();
 
         cognitiveEngine = new CognitiveEngine(this, new CognitiveEngine.Listener() {
             @Override public void onState(String state, String backend, String detail) {
@@ -88,7 +93,7 @@ public class MainActivity extends Activity {
 
         // Fast Brain is priority in Anastasia 6. Download on Wi-Fi and prewarm immediately.
         brainExecutor.execute(() -> {
-            if (fastModelFile().length() >= FAST_MODEL_READY_BYTES) ensureCognitiveLoaded();
+            if (fastModelComplete()) ensureCognitiveLoaded();
             else maybeStartFastModelDownload(false);
         });
     }
@@ -142,6 +147,82 @@ public class MainActivity extends Activity {
 
     private File modelFile() { return new File(modelsDir(), MODEL_NAME); }
     private File fastModelFile() { return new File(modelsDir(), FAST_MODEL_NAME); }
+
+    private void migrateLegacyFastBrain() {
+        try {
+            File old = new File(modelsDir(), LEGACY_FAST_MODEL_NAME);
+            long oldId = prefs.getLong("fastBrainDownloadId", -1);
+            DownloadManager dm = (DownloadManager)getSystemService(DOWNLOAD_SERVICE);
+            if (oldId > 0 && dm != null) {
+                try { dm.remove(oldId); } catch (Throwable ignored) {}
+            }
+            if (old.exists()) try { old.delete(); } catch (Throwable ignored) {}
+            prefs.edit().remove("fastBrainDownloadId").apply();
+        } catch (Throwable ignored) {}
+    }
+
+    private int fastDownloadStatus() {
+        long id = prefs.getLong("fastBrainGpuDownloadId", -1);
+        if (id <= 0) return 0;
+        DownloadManager dm = (DownloadManager)getSystemService(DOWNLOAD_SERVICE);
+        if (dm == null) return 0;
+        try (Cursor cur = dm.query(new DownloadManager.Query().setFilterById(id))) {
+            if (cur != null && cur.moveToFirst()) {
+                return cur.getInt(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            }
+        } catch (Throwable ignored) {}
+        return 0;
+    }
+
+    private String sha256(File file) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] buf = new byte[8 * 1024 * 1024];
+        try (FileInputStream in = new FileInputStream(file)) {
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+        }
+        StringBuilder sb = new StringBuilder(64);
+        for (byte b : md.digest()) sb.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+        return sb.toString();
+    }
+
+    private boolean verifyFastModel() {
+        File f = fastModelFile();
+        if (!f.isFile() || f.length() != FAST_MODEL_READY_BYTES) return false;
+        long size = f.length();
+        long modified = f.lastModified();
+        if (prefs.getBoolean("fastBrainHashOk", false) &&
+                prefs.getLong("fastBrainHashSize", -1) == size &&
+                prefs.getLong("fastBrainHashModified", -1) == modified) return true;
+        try {
+            cognitiveState = "verifying";
+            cognitiveDetail = "Verificando integridad del Fast Brain";
+            boolean ok = FAST_MODEL_SHA256.equalsIgnoreCase(sha256(f));
+            prefs.edit()
+                    .putBoolean("fastBrainHashOk", ok)
+                    .putLong("fastBrainHashSize", size)
+                    .putLong("fastBrainHashModified", modified)
+                    .apply();
+            if (!ok) {
+                cognitiveState = "corrupt";
+                cognitiveDetail = "El archivo no pasó la verificación; Anastasia lo descargará otra vez.";
+            }
+            return ok;
+        } catch (Throwable e) {
+            cognitiveState = "error";
+            cognitiveDetail = "No pude verificar el Fast Brain: " + e.getMessage();
+            return false;
+        }
+    }
+
+    private boolean fastModelComplete() {
+        File f = fastModelFile();
+        if (!f.isFile() || f.length() != FAST_MODEL_READY_BYTES) return false;
+        int st = fastDownloadStatus();
+        long id = prefs.getLong("fastBrainGpuDownloadId", -1);
+        if (id > 0 && st != DownloadManager.STATUS_SUCCESSFUL) return false;
+        return verifyFastModel();
+    }
 
     private boolean isUnmetered() {
         try {
@@ -199,23 +280,27 @@ public class MainActivity extends Activity {
 
     private synchronized void maybeStartFastModelDownload(boolean allowMetered) {
         File f = fastModelFile();
-        if (f.length() >= FAST_MODEL_READY_BYTES) return;
-        long old = prefs.getLong("fastBrainDownloadId", -1);
+        if (fastModelComplete()) return;
+        long old = prefs.getLong("fastBrainGpuDownloadId", -1);
         DownloadManager dm = (DownloadManager)getSystemService(DOWNLOAD_SERVICE);
         if (dm == null) return;
         if (downloadStillActive(dm, old, f, FAST_MODEL_READY_BYTES)) return;
+        if (f.exists()) {
+            try { f.delete(); } catch (Throwable ignored) {}
+            prefs.edit().remove("fastBrainHashOk").remove("fastBrainHashSize").remove("fastBrainHashModified").apply();
+        }
         if (!allowMetered && !isUnmetered()) return;
         try {
             DownloadManager.Request req = new DownloadManager.Request(Uri.parse(FAST_MODEL_URL));
             req.setTitle("Anastasia 6 · Cognitive Engine");
-            req.setDescription("Gemma 4 E2B · LiteRT-LM · cerebro rápido local");
+            req.setDescription("Gemma 4 E2B GPU · LiteRT-LM · cerebro rápido local");
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             if (!allowMetered) req.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
             req.setAllowedOverMetered(allowMetered);
             req.setAllowedOverRoaming(false);
             req.setDestinationInExternalFilesDir(this, null, "models/" + FAST_MODEL_NAME);
             long id = dm.enqueue(req);
-            prefs.edit().putLong("fastBrainDownloadId", id).apply();
+            prefs.edit().putLong("fastBrainGpuDownloadId", id).apply();
             cognitiveState = "downloading";
         } catch (Throwable e) {
             cognitiveState = "error";
@@ -226,13 +311,13 @@ public class MainActivity extends Activity {
     private String cognitiveStatusJson() {
         try {
             File f = fastModelFile();
-            JSONObject o = new JSONObject().put("model", "Gemma 4 E2B · LiteRT-LM");
-            if (f.length() >= FAST_MODEL_READY_BYTES) {
+            JSONObject o = new JSONObject().put("model", "Gemma 4 E2B GPU · LiteRT-LM");
+            if (fastModelComplete()) {
                 String st = cognitiveEngine != null && cognitiveEngine.getReady()
                         ? "ready" : ("error".equals(cognitiveState) ? "error" : "loading");
                 o.put("state", st).put("bytes", f.length()).put("total", f.length()).put("percent", 100);
             } else {
-                long id = prefs.getLong("fastBrainDownloadId", -1);
+                long id = prefs.getLong("fastBrainGpuDownloadId", -1);
                 DownloadManager dm = (DownloadManager)getSystemService(DOWNLOAD_SERVICE);
                 boolean found = false;
                 if (id > 0 && dm != null) {
@@ -314,7 +399,7 @@ public class MainActivity extends Activity {
         if (cognitiveEngine == null) return false;
         if (cognitiveEngine.getReady()) return true;
         File f = fastModelFile();
-        if (f.length() < FAST_MODEL_READY_BYTES) return false;
+        if (!fastModelComplete()) return false;
         if ("loading".equals(cognitiveState)) return false;
         cognitiveState = "loading";
         cognitiveDetail = "Precalentando modelo y caché";
@@ -367,7 +452,7 @@ public class MainActivity extends Activity {
 
 
         @JavascriptInterface public String cognitiveStatus() {
-            if (fastModelFile().length() >= FAST_MODEL_READY_BYTES &&
+            if (fastModelComplete() &&
                     cognitiveEngine != null && !cognitiveEngine.getReady() &&
                     !"loading".equals(cognitiveState)) {
                 brainExecutor.execute(MainActivity.this::ensureCognitiveLoaded);
@@ -384,9 +469,9 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public void fastAskAsync(String text, String requestId) {
-            if (fastModelFile().length() < FAST_MODEL_READY_BYTES) {
+            if (!fastModelComplete()) {
                 brainExecutor.execute(() -> maybeStartFastModelDownload(false));
-                deliverBrain(requestId, null, "Fast Brain todavía se está descargando.");
+                deliverBrain(requestId, null, "Fast Brain todavía se está descargando o verificando.");
                 return;
             }
             if (cognitiveEngine == null || !cognitiveEngine.getReady()) {
