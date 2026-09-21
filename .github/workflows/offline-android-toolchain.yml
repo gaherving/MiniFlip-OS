@@ -10,10 +10,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
       - name: Download and verify Gradle
         shell: bash
         run: |
@@ -28,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0' 'cmake;3.22.1' 'ndk;28.2.13676358' >/tmp/sdk-install.log 2>&1
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0' 'cmake;3.22.1' 'ndk;28.2.13676358' > /tmp/sdk-install.log 2>&1 || { cat /tmp/sdk-install.log; exit 1; }
       - name: Resolve public Maven dependencies with an empty sample
         shell: bash
         run: |
@@ -63,18 +66,19 @@ jobs:
             implementation("androidx.fragment:fragment-ktx:1.8.9")
             implementation("androidx.biometric:biometric:1.1.0")
             implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
+            implementation("com.android.tools.build:apksig:8.13.2")
           }
           EOF
           printf '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Dependency seed"/></manifest>\n' > app/src/main/AndroidManifest.xml
           mkdir -p app/src/main/java/org/example/publicdependencyseed
           printf 'package org.example.publicdependencyseed\nclass EmptyClass\n' > app/src/main/java/org/example/publicdependencyseed/EmptyClass.kt
-          /tmp/public-toolchain/gradle-8.13/bin/gradle --no-daemon --write-verification-metadata sha256 assembleDebug
+          /tmp/public-toolchain/gradle-8.13/bin/gradle --no-daemon --write-verification-metadata sha256 assembleDebug 2>&1 | tee /tmp/seed-build.log
           /tmp/public-toolchain/gradle-8.13/bin/gradle --stop
       - name: Package public dependencies and tooling only
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p /tmp/offline-output
           cp /tmp/public-toolchain/gradle.zip /tmp/offline-output/gradle-8.13-bin.zip
           tar -C "$JAVA_HOME" -czf /tmp/offline-output/jdk17.tar.gz .
@@ -85,7 +89,9 @@ jobs:
           git -C /tmp/public-llama rev-parse HEAD > /tmp/offline-output/llama-commit.txt
           tar --exclude='.git' -C /tmp/public-llama -czf /tmp/offline-output/llama-b6000-source.tar.gz .
           cp /tmp/empty-android-seed/gradle/verification-metadata.xml /tmp/offline-output/verification-metadata.xml || true
-          cp /tmp/sdk-install.log /tmp/offline-output/sdk-install.log || true
+          cp /tmp/sdk-install.log /tmp/seed-build.log /tmp/offline-output/ || true
+          curl -fL 'https://huggingface.co/api/models/bartowski/Qwen_Qwen3-4B-GGUF/revision/main?blobs=true' -o /tmp/offline-output/qwen-model-metadata.json || true
+          curl -fL 'https://huggingface.co/api/models/litert-community/gemma-4-E2B-it-litert-lm/revision/main?blobs=true' -o /tmp/offline-output/gemma-model-metadata.json || true
           cd /tmp/offline-output
           sha256sum *.zip *.tar.gz > SHA256SUMS
           du -h *
