@@ -1,0 +1,98 @@
+name: Public Android offline toolchain
+on:
+  push:
+    branches: [build/android-offline-toolchain-20260921]
+    paths: [.github/workflows/offline-android-toolchain.yml]
+permissions:
+  contents: read
+jobs:
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download and verify Gradle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/public-toolchain /tmp/empty-android-seed/app/src/main
+          cd /tmp/public-toolchain
+          curl -fL --retry 3 -o gradle.zip https://services.gradle.org/distributions/gradle-8.13-bin.zip
+          curl -fL --retry 3 -o gradle.sha https://services.gradle.org/distributions/gradle-8.13-bin.zip.sha256
+          echo "$(cat gradle.sha)  gradle.zip" | sha256sum -c -
+          unzip -q gradle.zip
+      - name: Install public SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0' 'cmake;3.22.1' 'ndk;28.2.13676358' >/tmp/sdk-install.log 2>&1
+      - name: Resolve public Maven dependencies with an empty sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/empty-android-seed
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name="PublicDependencySeed"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application") version "8.13.2" apply false
+            id("com.android.library") version "8.13.2" apply false
+            id("org.jetbrains.kotlin.android") version "2.3.0" apply false
+          }
+          EOF
+          printf 'android.useAndroidX=true\norg.gradle.jvmargs=-Xmx4g\n' > gradle.properties
+          cat > app/build.gradle.kts <<'EOF'
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+            namespace="org.example.publicdependencyseed"
+            compileSdk=36
+            defaultConfig { applicationId="org.example.publicdependencyseed"; minSdk=28; targetSdk=36; versionCode=1; versionName="1" }
+            compileOptions { sourceCompatibility=JavaVersion.VERSION_17; targetCompatibility=JavaVersion.VERSION_17 }
+            buildFeatures { buildConfig=true }
+          }
+          kotlin { jvmToolchain(17) }
+          dependencies {
+            implementation("androidx.webkit:webkit:1.12.1")
+            implementation("androidx.fragment:fragment-ktx:1.8.9")
+            implementation("androidx.biometric:biometric:1.1.0")
+            implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
+          }
+          EOF
+          printf '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Dependency seed"/></manifest>\n' > app/src/main/AndroidManifest.xml
+          mkdir -p app/src/main/java/org/example/publicdependencyseed
+          printf 'package org.example.publicdependencyseed\nclass EmptyClass\n' > app/src/main/java/org/example/publicdependencyseed/EmptyClass.kt
+          /tmp/public-toolchain/gradle-8.13/bin/gradle --no-daemon --write-verification-metadata sha256 assembleDebug
+          /tmp/public-toolchain/gradle-8.13/bin/gradle --stop
+      - name: Package public dependencies and tooling only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/offline-output
+          cp /tmp/public-toolchain/gradle.zip /tmp/offline-output/gradle-8.13-bin.zip
+          tar -C "$JAVA_HOME" -czf /tmp/offline-output/jdk17.tar.gz .
+          tar -C "$ANDROID_HOME" -czf /tmp/offline-output/android-sdk.tar.gz platforms/android-36 build-tools/35.0.0 build-tools/36.0.0 cmake/3.22.1 licenses
+          tar -C "$ANDROID_HOME" -czf /tmp/offline-output/android-ndk.tar.gz ndk/28.2.13676358
+          if [ -d "$HOME/.gradle/caches" ]; then tar --exclude='*.lock' --exclude='*.lck' --exclude='journal-1' -C "$HOME/.gradle" -czf /tmp/offline-output/gradle-public-cache.tar.gz caches; fi
+          git clone --depth 1 --branch b6000 https://github.com/ggml-org/llama.cpp.git /tmp/public-llama
+          git -C /tmp/public-llama rev-parse HEAD > /tmp/offline-output/llama-commit.txt
+          tar --exclude='.git' -C /tmp/public-llama -czf /tmp/offline-output/llama-b6000-source.tar.gz .
+          cp /tmp/empty-android-seed/gradle/verification-metadata.xml /tmp/offline-output/verification-metadata.xml || true
+          cp /tmp/sdk-install.log /tmp/offline-output/sdk-install.log || true
+          cd /tmp/offline-output
+          sha256sum *.zip *.tar.gz > SHA256SUMS
+          du -h *
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-android-toolchain
+          path: /tmp/offline-output/
+          compression-level: 0
+          retention-days: 3
