@@ -1,0 +1,53 @@
+name: Split public Android toolchain
+on:
+  push:
+    branches: [build/android-offline-toolchain-20260921]
+    paths: [.github/workflows/split-public-toolchain.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  split:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch existing public tooling artifact and verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pieces
+          gh api repos/gaherving/MiniFlip-OS/actions/artifacts/10648841208/zip > /tmp/toolchain.zip
+          echo '643ddf2a3e3c1f9cd28378bb8ab8dcb1675d6f20c0ec2c3d27143cb302860cbc  /tmp/toolchain.zip' | sha256sum -c -
+          split -b 400M -d /tmp/toolchain.zip /tmp/pieces/toolchain.part-
+          sha256sum /tmp/pieces/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-toolchain-part-00
+          path: /tmp/pieces/toolchain.part-00
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-toolchain-part-01
+          path: /tmp/pieces/toolchain.part-01
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-toolchain-part-02
+          path: /tmp/pieces/toolchain.part-02
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-toolchain-part-03
+          path: /tmp/pieces/toolchain.part-03
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-toolchain-part-04
+          path: /tmp/pieces/toolchain.part-04
+          compression-level: 0
+          retention-days: 3
