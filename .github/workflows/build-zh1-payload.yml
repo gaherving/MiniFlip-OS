@@ -1,0 +1,127 @@
+name: Build exact ZH1 payload candidate
+
+on:
+  push:
+    branches: [tmp-galaxy-root-checker]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "ndk;28.2.13676358"
+
+      - name: Clone payload source
+        run: |
+          git clone --depth 1 https://github.com/igorcv88/Root-My-Galaxy-Payloads-Extended.git payload
+
+      - name: Create exact ZH1 target
+        run: |
+          set -eux
+          cp -a payload/src/targets/pa3q-S938BXXSBCZG3 payload/src/targets/pa3q-S938BXXSCCZH1
+          sed -i 's/pa3q-S938BXXSBCZG3/pa3q-S938BXXSCCZH1/g' payload/src/targets/pa3q-S938BXXSCCZH1/target.h
+          sed -i 's/S938BXXSBCZG3_OXMBCZG3/S938BXXSCCZH1_OWOCCZH1/g' payload/src/targets/pa3q-S938BXXSCCZH1/target.h
+          grep -n "BUILD_VARIANT\|BUILD_FINGERPRINT\|P0_FINGERPRINT_HEADER" payload/src/targets/pa3q-S938BXXSCCZH1/target.h
+
+      - name: Build exploit and root helper
+        working-directory: payload
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: |
+          make TARGET=pa3q-S938BXXSCCZH1 all
+          mkdir -p ../out
+          cp build/pa3q-S938BXXSCCZH1/cve-2026-43499-app.so ../out/
+          cp build/pa3q-S938BXXSCCZH1/cve-2026-43499-root ../out/
+          sha256sum ../out/*
+
+      - name: Clone KernelSU v3.3.0
+        run: |
+          git clone --depth 1 --branch v3.3.0 https://github.com/tiann/KernelSU.git kernelsu-src
+          cp payload/kernelsu/patches/KernelSU-v3.3.0-samsung-kdp-rkp-defex.patch kernelsu-src/
+          cd kernelsu-src
+          git apply KernelSU-v3.3.0-samsung-kdp-rkp-defex.patch
+
+      - name: Build exact-release KernelSU module
+        run: |
+          set -eux
+          docker run --rm             -v "$PWD/kernelsu-src:/workspace"             -w /workspace/kernel             ghcr.io/ylarod/ddk-min:android15-6.6-20260828             bash -lc '
+              set -eux
+              RELEASE="6.6.98-android15-8-pd6ff1cd-abogkiS938BXXSCCZH1-4k"
+              printf "%s\n" "$RELEASE" > "$KDIR/include/config/kernel.release"
+              printf "#define UTS_RELEASE \"%s\"\n" "$RELEASE" > "$KDIR/include/generated/utsrelease.h"
+              make clean || true
+              CONFIG_KSU=m               CONFIG_KSU_SAMSUNG_KDP=y               CONFIG_KSU_SAMSUNG_RKP=y               CONFIG_KSU_SAMSUNG_DEFEX=y               CONFIG_KSU_SAMSUNG_NO_PATCH_TEXT=y               CC=clang make -j"$(nproc)"
+              modinfo ./kernelsu.ko | grep vermagic
+              llvm-strip -d ./kernelsu.ko
+            '
+          cp kernelsu-src/kernel/kernelsu.ko out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko
+
+      - name: Build ksud with embedded ZH1 module
+        run: |
+          set -eux
+          mkdir -p kernelsu-src/userspace/ksud/bin/aarch64
+          cp out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko kernelsu-src/userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko
+          rustup target add aarch64-linux-android
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          TOOL="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="$TOOL:$PATH"
+          export LIBCLANG_PATH="$TOOL"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOL/aarch64-linux-android35-clang"
+          export CC_aarch64_linux_android="$TOOL/aarch64-linux-android35-clang"
+          export AR_aarch64_linux_android="$TOOL/llvm-ar"
+          cd kernelsu-src
+          cargo clean -p ksud || true
+          cargo build --release --target aarch64-linux-android -p ksud
+          cp target/aarch64-linux-android/release/ksud ../out/ksud-S938BXXSCCZH1-kdp-v3.3.0
+
+      - name: Write exact profile metadata
+        run: |
+          python3 - <<'PY'
+          import json, hashlib, os
+          files = {}
+          for n in os.listdir("out"):
+              p=os.path.join("out",n)
+              if os.path.isfile(p):
+                  h=hashlib.sha256(open(p,"rb").read()).hexdigest()
+                  files[n]={"size":os.path.getsize(p),"sha256":h}
+          profile={
+            "payloadId":"pa3q-S938BXXSCCZH1-candidate-v1",
+            "device":"SM-S938B",
+            "codename":"pa3q",
+            "buildDisplay":"BP4A.251205.006.S938BXXSCCZH1",
+            "firmware":"S938BXXSCCZH1",
+            "android":16,
+            "sdk":36,
+            "abi":"arm64-v8a",
+            "pageSize":4096,
+            "kernelRelease":"6.6.98-android15-8-pd6ff1cd-abogkiS938BXXSCCZH1-4k",
+            "kmi":"android15-6.6",
+            "sourceBase":"pd6ff1cd",
+            "derivedFrom":"pa3q-S938BXXSBCZG3",
+            "status":"candidate-unverified-on-hardware",
+            "files":files
+          }
+          open("out/profile-S938BXXSCCZH1.json","w").write(json.dumps(profile,indent=2)+"\n")
+          PY
+          sha256sum out/* > out/SHA256SUMS.txt
+          cat out/profile-S938BXXSCCZH1.json
+
+      - name: Package
+        run: |
+          cd out
+          zip -9 ../S938BXXSCCZH1-exact-payload-candidate-v1.zip *
+          cd ..
+          sha256sum S938BXXSCCZH1-exact-payload-candidate-v1.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: S938BXXSCCZH1-exact-payload-candidate-v1
+          path: S938BXXSCCZH1-exact-payload-candidate-v1.zip
+          if-no-files-found: error
