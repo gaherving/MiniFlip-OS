@@ -63,25 +63,89 @@ jobs:
             '
           cp kernelsu-src/kernel/kernelsu.ko out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko
 
-      - name: Build ksud with embedded ZH1 module
+      - name: Build exact late-load wrapper
         run: |
           set -eux
-          mkdir -p kernelsu-src/userspace/ksud/bin/aarch64
-          cp out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko kernelsu-src/userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko
+          mkdir -p exact-loader/src exact-loader/assets
+          cp out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko exact-loader/assets/kernelsu.ko
+          curl -L --fail --retry 3             -o exact-loader/assets/ksud-real             https://raw.githubusercontent.com/igorcv88/Root-My-Galaxy-Payloads-Extended/main/kernelsu/ksud-s25u-kdp-v3.3.0
+
+          cp -a kernelsu-src/userspace/ksuinit exact-loader/ksuinit
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("exact-loader/ksuinit/Cargo.toml")
+          s=p.read_text()
+          s=s.replace("edition.workspace = true", 'edition = "2024"')
+          s=s.replace("anyhow.workspace = true", 'anyhow = "1"')
+          s=s.replace("log.workspace = true", 'log = "0.4"')
+          p.write_text(s)
+          PY
+
+          cat > exact-loader/Cargo.toml <<'EOF'
+          [package]
+          name = "ksud-zh1-wrapper"
+          version = "1.0.0"
+          edition = "2024"
+
+          [dependencies]
+          anyhow = "1"
+          ksuinit = { path = "ksuinit" }
+
+          [profile.release]
+          strip = true
+          lto = true
+          opt-level = "z"
+          panic = "abort"
+
+          [patch.crates-io]
+          libc = { git = "https://github.com/rust-lang/libc", rev = "1a661633f11a261ff9c00b40875ef72f1cbec818" }
+          EOF
+
+          cat > exact-loader/src/main.rs <<'EOF'
+          use anyhow::{Context, Result};
+          use std::ffi::CString;
+          use std::fs;
+          use std::os::unix::fs::PermissionsExt;
+          use std::os::unix::process::CommandExt;
+          use std::process::Command;
+
+          static MODULE: &[u8] = include_bytes!("../assets/kernelsu.ko");
+          static KSUD_REAL: &[u8] = include_bytes!("../assets/ksud-real");
+
+          fn main() -> Result<()> {
+              let args: Vec<String> = std::env::args().skip(1).collect();
+              let real = "/data/local/tmp/.ksud-zh1-real";
+
+              // Stage the real ksud before loading the module because Samsung
+              // DEFEX/KDP can restrict writes after the security context changes.
+              fs::write(real, KSUD_REAL).context("stage ksud-real")?;
+              fs::set_permissions(real, fs::Permissions::from_mode(0o755))
+                  .context("chmod ksud-real")?;
+
+              if !ksuinit::has_kernelsu() {
+                  let params = CString::new("allow_shell=1")?;
+                  ksuinit::load_module(MODULE, &params)
+                      .context("load exact ZH1 KernelSU module")?;
+              }
+
+              let err = Command::new(real).args(&args).exec();
+              Err(anyhow::anyhow!("exec ksud-real failed: {err}"))
+          }
+          EOF
+
           rustup target add aarch64-linux-android
           NDK="$ANDROID_SDK_ROOT/ndk/28.2.13676358"
           TOOL="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export PATH="$TOOL:$PATH"
-          export LIBCLANG_PATH="$TOOL"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOL/aarch64-linux-android35-clang"
           export CC_aarch64_linux_android="$TOOL/aarch64-linux-android35-clang"
           export AR_aarch64_linux_android="$TOOL/llvm-ar"
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          cd kernelsu-src
-          cargo clean -p ksud || true
-          cargo build --release --target aarch64-linux-android -p ksud
-          cp target/aarch64-linux-android/release/ksud ../out/ksud-S938BXXSCCZH1-kdp-v3.3.0
+          cargo build --manifest-path exact-loader/Cargo.toml --release --target aarch64-linux-android
+          cp exact-loader/target/aarch64-linux-android/release/ksud-zh1-wrapper              out/ksud-S938BXXSCCZH1-kdp-v3.3.0
+          chmod +x out/ksud-S938BXXSCCZH1-kdp-v3.3.0
+          file out/ksud-S938BXXSCCZH1-kdp-v3.3.0
+          sha256sum out/ksud-S938BXXSCCZH1-kdp-v3.3.0
 
       - name: Write exact profile metadata
         run: |
