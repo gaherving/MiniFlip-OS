@@ -1,0 +1,48 @@
+name: Build S938B ZH1 payload candidate
+on:
+  push:
+    branches: [tmp-galaxy-root-checker]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone payload source
+        run: git clone --depth 1 https://github.com/BuSung-dev/Root-My-Galaxy-Payloads.git payloads
+      - name: Create exact-build target candidate
+        run: |
+          cp -r payloads/src/targets/pa3q-S938NKSUACZF1 payloads/src/targets/pa3q-S938BXXSCCZH1
+          sed -i 's/pa3q-S938NKSUACZF1/pa3q-S938BXXSCCZH1/g' payloads/src/targets/pa3q-S938BXXSCCZH1/target.h
+          sed -i 's#samsung/pa3qksx/pa3q:16/BP4A.251205.006/S938NKSUACZF1_OKRACZF1:user/release-keys#samsung/pa3q/pa3q:16/BP4A.251205.006/S938BXXSCCZH1:user/release-keys#g' payloads/src/targets/pa3q-S938BXXSCCZH1/target.h
+          cat > payloads/src/targets/pa3q-S938BXXSCCZH1/PROVENANCE.txt <<'EOF'
+          Target: SM-S938B / pa3q
+          Build: BP4A.251205.006.S938BXXSCCZH1
+          Kernel observed on device: 6.6.98-android15-8-pd6ff1cd-abogkiS938BXXSCCZH1-4k
+          Candidate basis: pa3q S938N CZF1 target from upstream.
+          Rationale: same pa3q device family, kernel 6.6.98, GKI base pd6ff1cd.
+          IMPORTANT: offsets/fingerprint are not hardware-verified for ZH1. Do not label as verified until tested.
+          EOF
+      - name: Build payload
+        run: |
+          NDK="$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$NDK" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            yes | "$SDKMANAGER" --licenses >/dev/null || true
+            "$SDKMANAGER" "ndk;28.2.13676358"
+            NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          fi
+          echo "Using NDK: $NDK"
+          make -C payloads TARGET=pa3q-S938BXXSCCZH1 ANDROID_NDK_HOME="$NDK" release
+      - name: Package candidate
+        run: |
+          mkdir -p out
+          cp payloads/build/pa3q-S938BXXSCCZH1/cve-2026-43499-app.so out/
+          cp payloads/src/targets/pa3q-S938BXXSCCZH1/target.h out/
+          cp payloads/src/targets/pa3q-S938BXXSCCZH1/p0_fingerprint.h out/
+          cp payloads/src/targets/pa3q-S938BXXSCCZH1/PROVENANCE.txt out/
+          sha256sum out/* > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pa3q-S938BXXSCCZH1-payload-candidate
+          path: out/*
+          if-no-files-found: error
