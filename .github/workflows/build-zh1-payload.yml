@@ -32,9 +32,9 @@ jobs:
 
       - name: Build exploit and root helper
         working-directory: payload
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/28.2.13676358"
+          test -x "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           make TARGET=pa3q-S938BXXSCCZH1 all
           mkdir -p ../out
           cp build/pa3q-S938BXXSCCZH1/cve-2026-43499-app.so ../out/
@@ -69,7 +69,7 @@ jobs:
           mkdir -p kernelsu-src/userspace/ksud/bin/aarch64
           cp out/android15-6.6_kernelsu-S938BXXSCCZH1-kdp-v3.3.0.ko kernelsu-src/userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko
           rustup target add aarch64-linux-android
-          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          NDK="$ANDROID_SDK_ROOT/ndk/28.2.13676358"
           TOOL="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export PATH="$TOOL:$PATH"
           export LIBCLANG_PATH="$TOOL"
