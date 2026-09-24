@@ -80,6 +80,8 @@ jobs:
           s=s.replace("log.workspace = true", 'log = "0.4"')
           s=s.replace('rustix = { git = "https://github.com/KernelSU2/rustix.git", rev = "4a53fbc", features = ["mount", "fs", "runtime", "system", "process"] }',
                       'rustix = { version = "1.1.2", features = ["mount", "fs", "runtime", "system", "process"] }')
+          s=s.replace('rustix = { git = "https://github.com/Kernel-SU/rustix.git", rev = "4a53fbc", features = ["mount", "fs", "runtime", "system", "process"] }',
+                      'rustix = { version = "1.1.2", features = ["mount", "fs", "runtime", "system", "process"] }')
           p.write_text(s)
           PY
 
