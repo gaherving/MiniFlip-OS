@@ -139,7 +139,7 @@ public class MainActivity extends Activity {
 
   private String unameRelease(){
     try{
-      Process p=new ProcessBuilder("uname","-r").redirectErrorStream(true).start();
+      java.lang.Process p=new ProcessBuilder("uname","-r").redirectErrorStream(true).start();
       BufferedReader br=new BufferedReader(new InputStreamReader(p.getInputStream()));
       String s=br.readLine();
       return s==null?"desconocido":s;
