@@ -1,10 +1,10 @@
 package com.irving.galaxyrootchecker;
 
-import android.app.Activity;
-import android.os.Build;
-import android.os.Bundle;
+import android.app.*;
+import android.os.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.content.DialogInterface;
 import android.view.View;
 import android.widget.*;
 import java.io.*;
@@ -13,6 +13,7 @@ import java.util.*;
 public class MainActivity extends Activity {
   private TextView result;
   private Button rootBtn;
+  private Profile detected;
 
   static class Profile {
     String model, buildToken, kernelContains, status, note;
@@ -23,9 +24,9 @@ public class MainActivity extends Activity {
 
   private final List<Profile> profiles = Arrays.asList(
     new Profile("SM-S938B","S938BXXSBCZG3","6.6.98-android15-8-pd6ff1cd","VERIFIED",
-      "Perfil conocido para SM-S938B. Se requiere payload exacto antes de ejecutar root."),
+      "Perfil conocido. Requiere payload exacto de esa build."),
     new Profile("SM-S938B","S938BXXSCCZH1","6.6.98-android15-8-pd6ff1cd","EXPERIMENTAL",
-      "Tu build coincide en modelo y base de kernel, pero no hay payload exacto verificado integrado todavía.")
+      "Coincide modelo y base de kernel, pero el payload exacto para ZH1 aún no está verificado.")
   );
 
   @Override public void onCreate(Bundle b){
@@ -39,7 +40,7 @@ public class MainActivity extends Activity {
 
     TextView title=txt("Galaxy Root Checker",28,Typeface.BOLD,Color.rgb(28,28,28));
     root.addView(title);
-    TextView sub=txt("Diagnóstico local de compatibilidad. No ejecuta root ni modifica el sistema.",15,Typeface.NORMAL,Color.DKGRAY);
+    TextView sub=txt("Analiza el firmware antes de permitir cualquier intento de root.",15,Typeface.NORMAL,Color.DKGRAY);
     sub.setPadding(0,dp(8),0,dp(22));
     root.addView(sub);
 
@@ -55,16 +56,18 @@ public class MainActivity extends Activity {
     root.addView(result);
 
     rootBtn=new Button(this);
-    rootBtn.setText("ROOT TEMPORAL — BLOQUEADO");
-    rootBtn.setEnabled(false);
+    rootBtn.setText("ROOT TEMPORAL");
+    rootBtn.setEnabled(true);
     rootBtn.setAllCaps(false);
+    rootBtn.setMinHeight(dp(56));
     root.addView(rootBtn,new LinearLayout.LayoutParams(-1,-2));
 
-    TextView note=txt("La app solo habilitará root cuando exista una coincidencia exacta y un payload verificado para esa build.",13,Typeface.NORMAL,Color.GRAY);
+    TextView note=txt("El botón hace una comprobación final antes de ejecutar nada. Si la build no tiene un payload exacto verificado, aborta y no modifica el sistema.",13,Typeface.NORMAL,Color.GRAY);
     note.setPadding(0,dp(14),0,0);
     root.addView(note);
 
     scanBtn.setOnClickListener(v->scan());
+    rootBtn.setOnClickListener(v->attemptRoot());
   }
 
   private void scan(){
@@ -76,12 +79,13 @@ public class MainActivity extends Activity {
     String kernel=readFirst("/proc/version");
     String release=unameRelease();
 
-    Profile exact=null, partial=null;
+    detected=null;
+    Profile partial=null;
     for(Profile p:profiles){
       boolean modelOk=model.equalsIgnoreCase(p.model);
       boolean buildOk=display.contains(p.buildToken) || fingerprint.contains(p.buildToken);
       boolean kernelOk=(kernel.contains(p.kernelContains) || release.contains(p.kernelContains));
-      if(modelOk && buildOk && kernelOk){ exact=p; break; }
+      if(modelOk && buildOk && kernelOk){ detected=p; break; }
       if(modelOk && kernelOk) partial=p;
     }
 
@@ -92,24 +96,45 @@ public class MainActivity extends Activity {
     sb.append("Build: ").append(display).append("\n");
     sb.append("Kernel release: ").append(release).append("\n\n");
 
-    if(exact!=null){
-      sb.append("Perfil: ").append(exact.buildToken).append("\n");
-      sb.append("Estado: ").append(exact.status).append("\n");
-      sb.append(exact.note);
-      rootBtn.setText("VERIFIED".equals(exact.status) ? "ROOT TEMPORAL — REQUIERE PAYLOAD" : "ROOT TEMPORAL — NO VERIFICADO");
-      rootBtn.setEnabled(false);
+    if(detected!=null){
+      sb.append("Perfil: ").append(detected.buildToken).append("\n");
+      sb.append("Estado: ").append(detected.status).append("\n");
+      sb.append(detected.note);
     } else if(partial!=null){
       sb.append("Coincidencia parcial encontrada.\nEstado: NO VERIFICADO\n");
-      sb.append("La app no ejecutará ningún payload hasta tener coincidencia exacta.");
-      rootBtn.setText("ROOT TEMPORAL — BLOQUEADO");
-      rootBtn.setEnabled(false);
+      sb.append("No se ejecutará ningún payload.");
     } else {
       sb.append("Estado: SIN PERFIL COMPATIBLE\n");
-      sb.append("No se encontró una coincidencia segura en la base local.");
-      rootBtn.setText("ROOT TEMPORAL — BLOQUEADO");
-      rootBtn.setEnabled(false);
+      sb.append("No se encontró una coincidencia segura.");
     }
     result.setText(sb.toString());
+  }
+
+  private void attemptRoot(){
+    if(detected==null) scan();
+
+    if(detected==null){
+      show("Root bloqueado","No hay un perfil exacto para este dispositivo. No se ejecutó nada.");
+      return;
+    }
+
+    if(!"VERIFIED".equals(detected.status)){
+      show("Root bloqueado por seguridad",
+        "Tu build "+detected.buildToken+" está marcada como "+detected.status+
+        ".\n\nNo hay un payload exacto verificado integrado, así que la app abortó antes de modificar el sistema.");
+      return;
+    }
+
+    new AlertDialog.Builder(this)
+      .setTitle("Confirmar root temporal")
+      .setMessage("La build coincide con un perfil verificado. Aun así, esta versión de prueba no incluye todavía un payload ejecutable. No se modificará el sistema.")
+      .setNegativeButton("Cancelar",null)
+      .setPositiveButton("Entendido",(d,w)->show("Sin cambios","No se ejecutó ningún exploit ni se modificó el sistema."))
+      .show();
+  }
+
+  private void show(String title,String msg){
+    new AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("OK",null).show();
   }
 
   private String unameRelease(){
