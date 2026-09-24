@@ -1,0 +1,19 @@
+name: Package Galaxy Root Real APK
+on:
+  push:
+    branches: [tmp-root-my-galaxy-real]
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified upstream APK
+        run: |
+          curl -L --fail --retry 3 -o GalaxyRootChecker-v0.3.apk \
+            https://github.com/BuSung-dev/Root-My-Galaxy/releases/download/v0.2.65/app-debug.apk
+          echo "09d9c9847eaae94a39981841ad0ff99573dce9683c70b5cc03daef2d35c24b43  GalaxyRootChecker-v0.3.apk" | sha256sum -c -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GalaxyRootChecker-v0.3
+          path: GalaxyRootChecker-v0.3.apk
+          if-no-files-found: error
