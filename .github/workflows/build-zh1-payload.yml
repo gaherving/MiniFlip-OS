@@ -76,6 +76,8 @@ jobs:
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOL/aarch64-linux-android35-clang"
           export CC_aarch64_linux_android="$TOOL/aarch64-linux-android35-clang"
           export AR_aarch64_linux_android="$TOOL/llvm-ar"
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
           cd kernelsu-src
           cargo clean -p ksud || true
           cargo build --release --target aarch64-linux-android -p ksud
