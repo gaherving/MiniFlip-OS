@@ -36,7 +36,7 @@ jobs:
       - name: Package candidate
         run: |
           mkdir -p out
-          cp payloads/build/pa3q-S938BXXSCCZH1/cve-2026-43499-app.so out/
+          cp payloads/build/pa3q-S938BXXSCCZH1/cve-2026-43499-app.release.so out/
           cp payloads/src/targets/pa3q-S938BXXSCCZH1/target.h out/
           cp payloads/src/targets/pa3q-S938BXXSCCZH1/p0_fingerprint.h out/
           cp payloads/src/targets/pa3q-S938BXXSCCZH1/PROVENANCE.txt out/
